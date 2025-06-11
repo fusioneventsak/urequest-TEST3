@@ -41,7 +41,6 @@ export function useConnectionHealth() {
           .then(() => {
             setIsReconnecting(false);
             if (statusRef.current === 'disconnected') {
-              toast.success('Connection restored');
             }
           })
           .catch(() => {
@@ -58,14 +57,11 @@ export function useConnectionHealth() {
       if (state === 'connected') {
         setStatus('good');
         if (statusRef.current === 'disconnected') {
-          toast.success('Connection restored');
         }
       } else if (state === 'disconnected') {
         setStatus('disconnected');
-        toast.error('Connection lost. Using cached data.');
       } else if (state === 'error') {
         setStatus('disconnected');
-        toast.error('Connection error. Using cached data.');
       }
     };
     
@@ -81,15 +77,12 @@ export function useConnectionHealth() {
     if (isReconnecting) return;
     
     setIsReconnecting(true);
-    toast.loading('Reconnecting...');
     
     try {
       await enhancedRealtimeManager.reconnect();
       setStatus('good');
-      toast.success('Connection restored');
     } catch (error) {
       console.error('Manual reconnection failed:', error);
-      toast.error('Failed to reconnect. Please try again.');
     } finally {
       setIsReconnecting(false);
     }

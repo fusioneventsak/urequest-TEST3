@@ -16,20 +16,13 @@ export function ConnectionStatus({ className = '', showDetails = false, showAlwa
     reconnect();
   }, [reconnect]);
   
-  // Only show when connection is completely lost or when explicitly requested
-  if ((status !== 'disconnected' && !showAlways) || (status === 'good' && !showAlways)) {
-    return null; // Don't show anything when connection is good
+  // Don't show connection status on the request page or when connection is good
+  if (!showAlways || status === 'good') {
+    return null;
   }
   
   return (
     <div className={`flex items-center ${className}`}>
-      {status === 'good' && (
-        <div className="flex items-center text-green-400 text-xs bg-green-400/10 px-2 py-1 rounded-md">
-          <Wifi className="w-3 h-3 mr-1" />
-          <span>Connected</span>
-        </div>
-      )}
-      
       {status === 'disconnected' && (
         <button
           onClick={handleReconnect}

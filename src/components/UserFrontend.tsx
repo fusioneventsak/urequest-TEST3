@@ -158,9 +158,6 @@ export function UserFrontend({
             )}
             
             {/* Add connection status indicator */}
-            <div className="absolute right-4 top-14 z-10">
-              <ConnectionStatus showAlways={false} />
-            </div>
           </div>
         </div>
       </header>

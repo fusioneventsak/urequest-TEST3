@@ -6,8 +6,7 @@
                      Offline Mode
                    </div>
                  )}
--                <ConnectionStatus showAlways={true} />
-+                <ConnectionStatus />
+                <ConnectionStatus />
                  <button 
                    onClick={navigateToFrontend}
                    className="neon-button"

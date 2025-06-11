@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { LayoutDashboard, Users, Music as BookMusic, ListMusic, Cog, Settings } from 'lucide-react';
-import { ConnectionStatus } from './ConnectionStatus';
 
 type TabId = 'requests' | 'setlists' | 'songs' | 'settings';
 
@@ -42,11 +41,6 @@ export function BackendTabs({ activeTab, onTabChange }: BackendTabsProps) {
   return (
     <div className="mb-6">
       <div className="glass-effect rounded-lg overflow-hidden relative">
-        {/* Connection status indicator */}
-        <div className="absolute right-2 top-2 z-10">
-          <ConnectionStatus showAlways={true} />
-        </div>
-        
         {/* Desktop tabs */}
         <div className="hidden md:flex">
           {tabs.map(tab => (

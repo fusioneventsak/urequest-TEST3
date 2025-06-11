@@ -43,12 +43,10 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
       setIsOnline(true);
       // Immediately fetch when coming back online
       fetchRequests(true);
-      toast.success('Network connection restored');
     };
     
     const handleOffline = () => {
       setIsOnline(false);
-      toast.error('Network connection lost. Using cached data.');
     };
     
     window.addEventListener('online', handleOnline);
@@ -254,7 +252,6 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
           
           // Only show toast after multiple failures to avoid spamming
           if (fetchFailCount > 2) {
-            toast.error('Having trouble connecting to the server. Using cached data.');
           }
         }
         
@@ -440,16 +437,13 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
   const reconnect = useCallback(async () => {
     console.log('🔄 Manual reconnection requested');
     setError(null);
-    toast.loading('Reconnecting to server...');
     
     try {
       await enhancedRealtimeManager.reconnect();
       fetchRequests(true);
-      toast.success('Reconnected successfully');
     } catch (error) {
       console.error('❌ Manual reconnection failed:', error);
       setError(error instanceof Error ? error : new Error(String(error)));
-      toast.error('Failed to reconnect. Please try again later.');
     }
   }, [fetchRequests]);
 
