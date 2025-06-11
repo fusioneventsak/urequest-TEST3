@@ -8,10 +8,11 @@ const SONGS_CACHE_KEY = 'songs:all';
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY = 1000; // 1 second base delay
 
-export function useSongSync(onUpdate: (songs: Song[]) => void) {
+export function useSongSync() {
+  const [songs, setSongs] = useState<Song[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const retryCountRef = useRef(0); // Changed from useState to useRef
+  const retryCountRef = useRef(0);
   const mountedRef = useRef(true);
   const subscriptionRef = useRef<string | null>(null);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -39,7 +40,7 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
         if (cachedSongs?.length > 0) {
           console.log('Using cached songs');
           if (mountedRef.current) {
-            onUpdate(cachedSongs);
+            setSongs(cachedSongs);
             setIsLoading(false);
           }
           return;
@@ -57,8 +58,8 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
 
       if (songsData && mountedRef.current) {
         cacheService.setSongs(SONGS_CACHE_KEY, songsData);
-        onUpdate(songsData);
-        retryCountRef.current = 0; // Use ref instead of setState
+        setSongs(songsData);
+        retryCountRef.current = 0;
       }
     } catch (error) {
       console.error('Error fetching songs:', error);
@@ -70,7 +71,7 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
         const cachedSongs = cacheService.get<Song[]>(SONGS_CACHE_KEY);
         if (cachedSongs) {
           console.warn('Using stale cache due to fetch error');
-          onUpdate(cachedSongs);
+          setSongs(cachedSongs);
         }
         
         // Retry with exponential backoff
@@ -84,7 +85,7 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
           
           fetchTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
-              retryCountRef.current++; // Use ref instead of setState
+              retryCountRef.current++;
               fetchSongs(true);
             }
           }, delay);
@@ -96,7 +97,7 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
       }
       fetchInProgressRef.current = false;
     }
-  }, [onUpdate]); // Removed retryCount from dependencies
+  }, []);
 
   // Setup realtime subscription
   useEffect(() => {
@@ -158,9 +159,15 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
     };
   }, [fetchSongs]);
 
+  const refreshSongs = useCallback(() => {
+    fetchSongs(true);
+  }, [fetchSongs]);
+
   return { 
+    songs,
+    setSongs,
     isLoading, 
     error, 
-    refetch: () => fetchSongs(true) 
+    refreshSongs
   };
 }
