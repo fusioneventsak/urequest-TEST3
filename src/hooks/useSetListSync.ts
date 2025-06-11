@@ -124,7 +124,13 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
     mountedRef.current = true;
     
     // Initialize enhancedRealtimeManager
-    enhancedRealtimeManager.init();
+    try {
+      enhancedRealtimeManager.init().catch(error => {
+        console.warn('Error initializing realtime manager, falling back to polling:', error);
+      });
+    } catch (error) {
+      console.warn('Error initializing realtime manager, falling back to polling:', error);
+    }
     
     // Setup subscriptions
     const setupSubscriptions = () => {

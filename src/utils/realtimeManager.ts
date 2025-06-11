@@ -56,9 +56,6 @@ class EnhancedRealtimeManager {
       this.connectionStatus = 'connecting';
       this.isInitialized = true;
       
-      // Setup connection monitoring
-      this.setupConnectionMonitoring();
-      
       // Start heartbeat for connection health
       this.startHeartbeat();
       

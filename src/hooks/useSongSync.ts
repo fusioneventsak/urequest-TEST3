@@ -103,7 +103,13 @@ export function useSongSync(onUpdate: (songs: Song[]) => void) {
     mountedRef.current = true;
     
     // Initialize enhancedRealtimeManager
-    enhancedRealtimeManager.init();
+    try {
+      enhancedRealtimeManager.init().catch(error => {
+        console.warn('Error initializing realtime manager, falling back to polling:', error);
+      });
+    } catch (error) {
+      console.warn('Error initializing realtime manager, falling back to polling:', error);
+    }
     
     // Setup subscription
     const setupSubscription = () => {

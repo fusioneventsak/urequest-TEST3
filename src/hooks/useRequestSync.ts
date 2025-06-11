@@ -74,7 +74,11 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
     try {
       // Cancel any existing request
       if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+        try {
+          abortControllerRef.current.abort();
+        } catch (error) {
+          console.warn('Error aborting previous request:', error);
+        }
       }
       
       abortControllerRef.current = new AbortController();
@@ -243,7 +247,11 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
     const initializeSync = async () => {
       try {
         // Initialize the enhanced realtime manager
-        await enhancedRealtimeManager.init();
+        try {
+          await enhancedRealtimeManager.init();
+        } catch (error) {
+          console.warn('Error initializing realtime manager, falling back to polling:', error);
+        }
         
         // Setup high-priority subscription for requests table
         requestsSubscriptionRef.current = enhancedRealtimeManager.createSubscription(
