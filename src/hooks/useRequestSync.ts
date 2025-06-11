@@ -67,14 +67,16 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
       return;
     }
 
+    fetchInProgressRef.current = true;
+
     // Rate limiting - don't fetch more than once every 2 seconds
     const now = Date.now();
     if (!bypassCache && (now - lastFetchTimeRef.current) < 2000) {
       console.log('⏭️ Rate limited, skipping fetch');
+      fetchInProgressRef.current = false;
       return;
     }
 
-    fetchInProgressRef.current = true;
     lastFetchTimeRef.current = now;
 
     try {
