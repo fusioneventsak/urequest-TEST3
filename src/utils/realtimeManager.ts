@@ -25,6 +25,7 @@ class EnhancedRealtimeManager {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private clientId = nanoid(8);
+  private channelRetries = new Map<string, number>();
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private connectionListeners = new Set<(status: string) => void>();
   private isInitialized = false;
@@ -231,12 +232,23 @@ class EnhancedRealtimeManager {
           this.connectionStatus = 'connected';
           this.notifyConnectionListeners('connected');
         } else if (status === 'CHANNEL_ERROR') {
-          console.error(`❌ Channel error for ${table}`);
+          console.warn(`⚠️ Channel error for ${table} - attempting recovery`);
           this.notifyConnectionListeners('error');
-          // Attempt to resubscribe after delay
-          setTimeout(() => {
-            this.createSubscription(table, callback, filter, priority);
-          }, 2000);
+          
+          // Track retry attempts for this channel
+          const retryCount = this.channelRetries.get(channelId) || 0;
+          if (retryCount < 3) {
+            this.channelRetries.set(channelId, retryCount + 1);
+            // Exponential backoff: 2s, 4s, 8s
+            const delay = 2000 * Math.pow(2, retryCount);
+            console.log(`🔄 Retrying ${table} subscription in ${delay}ms (attempt ${retryCount + 1}/3)`);
+            
+            setTimeout(() => {
+              this.createSubscription(table, callback, filter, priority);
+            }, delay);
+          } else {
+            console.error(`❌ Max retries reached for ${table} channel`);
+          }
         }
       });
       
@@ -264,6 +276,7 @@ class EnhancedRealtimeManager {
       const config = this.activeChannels.get(channelId);
       if (config) {
         await config.channel.unsubscribe();
+        this.channelRetries.delete(channelId);
         this.activeChannels.delete(channelId);
         
         // Clear any pending timeouts
@@ -348,6 +361,7 @@ class EnhancedRealtimeManager {
     // Clear all timeouts
     this.updateTimeouts.forEach(timeout => clearTimeout(timeout));
     this.updateTimeouts.clear();
+    this.channelRetries.clear();
     
     // Remove all subscriptions
     this.activeChannels.forEach(async (config, channelId) => {
