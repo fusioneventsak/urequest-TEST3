@@ -1,3 +1,4 @@
+// src/components/QueueView.tsx
 import React, { useState, useCallback, useMemo } from 'react';
 import { supabase } from '../utils/supabase';
 import { LoadingSpinner } from './shared/LoadingSpinner';
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { SongRequest } from '../types';
+import { useUiSettings } from '../hooks/useUiSettings';
 
 interface QueueViewProps {
   requests: SongRequest[];
@@ -40,6 +42,11 @@ export function QueueView({
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
   const [showPlayedRequests, setShowPlayedRequests] = useState(false);
+  const { settings } = useUiSettings();
+  
+  // Get theme colors from settings
+  const accentColor = settings?.frontend_accent_color || '#ff00ff';
+  const secondaryColor = settings?.frontend_secondary_accent || '#9d00ff';
 
   // Filter and sort requests
   const { pendingRequests, playedRequests } = useMemo(() => {
@@ -48,6 +55,10 @@ export function QueueView({
 
     const sortRequests = (reqs: SongRequest[]) => {
       return [...reqs].sort((a, b) => {
+        // Always put locked requests at the top
+        if (a.isLocked && !b.isLocked) return -1;
+        if (!a.isLocked && b.isLocked) return 1;
+        
         switch (sortBy) {
           case 'votes':
             if (a.votes !== b.votes) return b.votes - a.votes;
@@ -142,36 +153,40 @@ export function QueueView({
 
     return (
       <div className={`
-        bg-white rounded-lg border-2 transition-all duration-200
-        ${request.isLocked ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 hover:border-gray-300'}
+        glass-effect rounded-lg transition-all duration-200
+        ${request.isLocked ? `border-2 border-${accentColor} bg-${accentColor}/10` : 'border border-neon-purple/20'}
         ${request.isPlayed ? 'opacity-60' : ''}
-      `}>
-        <div className="p-4">
+      `}
+      style={{
+        borderColor: request.isLocked ? accentColor : 'rgba(157, 0, 255, 0.2)',
+        backgroundColor: request.isLocked ? `${accentColor}10` : 'rgba(26, 11, 46, 0.7)'
+      }}>
+        <div className="p-3">
           {/* Header */}
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <Music className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                <h3 className="font-semibold text-gray-900 truncate">
+                <Music className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <h3 className="font-semibold text-white truncate text-sm">
                   {request.title}
                 </h3>
                 {request.isLocked && (
-                  <Lock className="w-4 h-4 text-yellow-600 flex-shrink-0" />
+                  <Lock className="w-4 h-4 text-yellow-400 flex-shrink-0" />
                 )}
               </div>
               {request.artist && (
-                <p className="text-sm text-gray-600 truncate">
+                <p className="text-xs text-gray-300 truncate">
                   by {request.artist}
                 </p>
               )}
             </div>
             
-            <div className="flex items-center gap-2 ml-4">
-              <div className="flex items-center gap-1 text-sm text-gray-500">
-                <Users className="w-4 h-4" />
+            <div className="flex items-center gap-2 ml-3">
+              <div className="flex items-center gap-1 text-xs text-gray-400">
+                <Users className="w-3 h-3" />
                 <span>{requesterCount}</span>
               </div>
-              <div className="flex items-center gap-1 text-sm text-gray-500">
+              <div className="flex items-center gap-1 text-xs text-gray-400">
                 <span className="font-medium">{request.votes}</span>
                 <span>votes</span>
               </div>
@@ -179,15 +194,15 @@ export function QueueView({
           </div>
 
           {/* Stats */}
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+          <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
             <div className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
               <span>{formatTimeAgo(request.createdAt)}</span>
             </div>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-              request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-              request.status === 'approved' ? 'bg-green-100 text-green-800' :
-              'bg-gray-100 text-gray-800'
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+              request.status === 'pending' ? 'bg-yellow-900/30 text-yellow-400' :
+              request.status === 'approved' ? 'bg-green-900/30 text-green-400' :
+              'bg-gray-800/30 text-gray-400'
             }`}>
               {request.status}
             </span>
@@ -195,58 +210,61 @@ export function QueueView({
 
           {/* Actions */}
           {!request.isPlayed && (
-            <div className="flex gap-2 mb-3">
-              <Button
-                variant={request.isLocked ? 'secondary' : 'primary'}
-                size="sm"
+            <div className="flex gap-2 mb-2">
+              <button
                 onClick={() => handleAction(request.id, () => onLockRequest(request.id))}
                 disabled={isActionLoading}
-                className="flex-1"
+                className={`flex-1 px-2 py-1 rounded-md text-xs font-medium flex items-center justify-center transition-colors ${
+                  request.isLocked 
+                    ? 'bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50' 
+                    : 'bg-neon-purple/20 text-neon-pink hover:bg-neon-purple/30'
+                }`}
+                style={{
+                  backgroundColor: request.isLocked ? 'rgba(234, 179, 8, 0.3)' : 'rgba(157, 0, 255, 0.2)',
+                  color: request.isLocked ? '#facc15' : accentColor
+                }}
               >
                 {isActionLoading ? (
                   <LoadingSpinner size="sm" />
                 ) : request.isLocked ? (
                   <>
-                    <Unlock className="w-4 h-4 mr-1" />
+                    <Unlock className="w-3 h-3 mr-1" />
                     Unlock
                   </>
                 ) : (
                   <>
-                    <Lock className="w-4 h-4 mr-1" />
+                    <Lock className="w-3 h-3 mr-1" />
                     Lock as Next
                   </>
                 )}
-              </Button>
+              </button>
               
-              <Button
-                variant="success"
-                size="sm"
+              <button
                 onClick={() => handleAction(request.id, () => onMarkPlayed(request.id))}
                 disabled={isActionLoading}
-                className="flex-1"
+                className="flex-1 px-2 py-1 bg-green-900/30 text-green-400 hover:bg-green-900/50 rounded-md text-xs font-medium flex items-center justify-center transition-colors"
               >
                 {isActionLoading ? (
                   <LoadingSpinner size="sm" />
                 ) : (
                   <>
-                    <Play className="w-4 h-4 mr-1" />
+                    <Play className="w-3 h-3 mr-1" />
                     Mark Played
                   </>
                 )}
-              </Button>
+              </button>
               
-              <Button
-                variant="danger"
-                size="sm"
+              <button
                 onClick={() => handleAction(request.id, () => handleDeleteRequest(request.id))}
                 disabled={isActionLoading}
+                className="px-2 py-1 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-md text-xs font-medium flex items-center justify-center transition-colors"
               >
                 {isActionLoading ? (
                   <LoadingSpinner size="sm" />
                 ) : (
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-3 h-3" />
                 )}
-              </Button>
+              </button>
             </div>
           )}
 
@@ -254,37 +272,38 @@ export function QueueView({
           {requesterCount > 0 && (
             <button
               onClick={() => toggleExpanded(request.id)}
-              className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors"
+              className="flex items-center gap-1 text-xs text-neon-pink hover:text-white transition-colors"
+              style={{ color: accentColor }}
             >
-              <MessageSquare className="w-4 h-4" />
+              <MessageSquare className="w-3 h-3" />
               <span>
                 {requesterCount === 1 ? '1 requester' : `${requesterCount} requesters`}
               </span>
               {isExpanded ? (
-                <ChevronUp className="w-4 h-4" />
+                <ChevronUp className="w-3 h-3" />
               ) : (
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown className="w-3 h-3" />
               )}
             </button>
           )}
 
           {/* Expanded requesters */}
           {isExpanded && request.requesters && request.requesters.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-200">
+            <div className="mt-2 pt-2 border-t border-neon-purple/20">
               <div className="space-y-2">
                 {request.requesters.map((requester, index) => (
-                  <div key={index} className="flex items-start gap-3">
+                  <div key={index} className="flex items-start gap-2">
                     <img
                       src={requester.photo}
                       alt={requester.name}
-                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      className="w-6 h-6 rounded-full object-cover flex-shrink-0 border border-neon-purple/30"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
                         target.src = `data:image/svg+xml;base64,${btoa(`
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
-                            <rect width="100" height="100" fill="#e5e7eb" />
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="24" height="24">
+                            <rect width="100" height="100" fill="#1a0b2e" />
                             <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
-                                  fill="#6b7280" text-anchor="middle" dominant-baseline="central">
+                                  fill="#9d00ff" text-anchor="middle" dominant-baseline="central">
                               ${requester.name.charAt(0).toUpperCase()}
                             </text>
                           </svg>
@@ -292,11 +311,11 @@ export function QueueView({
                       }}
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm text-gray-900">
+                      <p className="font-medium text-xs text-white">
                         {requester.name}
                       </p>
                       {requester.message && (
-                        <p className="text-sm text-gray-600 mt-1">
+                        <p className="text-xs text-gray-300 mt-1 bg-neon-purple/10 p-1 rounded">
                           "{requester.message}"
                         </p>
                       )}
@@ -323,68 +342,84 @@ export function QueueView({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Request Queue</h2>
-          <p className="text-gray-600 mt-1">
+          <h2 className="text-xl font-bold text-white neon-text">Request Queue</h2>
+          <p className="text-gray-400 text-sm">
             {pendingRequests.length} pending • {playedRequests.length} played
           </p>
         </div>
         
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortOption)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="px-2 py-1 bg-neon-purple/10 border border-neon-purple/20 rounded-md text-xs text-white focus:outline-none focus:border-neon-pink"
           >
             <option value="votes">Sort by Votes</option>
             <option value="time">Sort by Time</option>
             <option value="requesters">Sort by Requesters</option>
           </select>
           
-          <Button
-            variant="danger"
-            onClick={onResetQueue}
+          <button
+            onClick={() => onResetQueue()}
             disabled={pendingRequests.length === 0}
+            className="px-2 py-1 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-md text-xs font-medium flex items-center transition-colors disabled:opacity-50"
           >
-            <RotateCcw className="w-4 h-4 mr-2" />
+            <RotateCcw className="w-3 h-3 mr-1" />
             Reset Queue
-          </Button>
+          </button>
         </div>
       </div>
 
       {/* Locked request highlight */}
       {lockedRequest && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Lock className="w-5 h-5 text-yellow-600" />
-            <h3 className="font-semibold text-yellow-800">Next Song</h3>
+        <div className="glass-effect rounded-lg p-3 border-2 border-yellow-400 bg-yellow-900/20">
+          <div className="flex items-center gap-2 mb-1">
+            <Lock className="w-4 h-4 text-yellow-400" />
+            <h3 className="font-semibold text-yellow-400 text-sm">Next Song</h3>
           </div>
-          <p className="text-yellow-700">
+          <p className="text-white text-sm">
             <span className="font-medium">{lockedRequest.title}</span>
-            {lockedRequest.artist && <span> by {lockedRequest.artist}</span>}
+            {lockedRequest.artist && <span className="text-gray-300"> by {lockedRequest.artist}</span>}
           </p>
+          {lockedRequest.requesters && lockedRequest.requesters.length > 0 && (
+            <div className="flex items-center mt-1 gap-1">
+              <span className="text-xs text-gray-400">Requested by:</span>
+              <div className="flex -space-x-1">
+                {lockedRequest.requesters.slice(0, 3).map((requester, idx) => (
+                  <img 
+                    key={idx}
+                    src={requester.photo} 
+                    alt={requester.name}
+                    className="w-4 h-4 rounded-full border border-yellow-400/50"
+                    title={requester.name}
+                  />
+                ))}
+              </div>
+              {lockedRequest.requesters.length > 3 && (
+                <span className="text-xs text-gray-400">+{lockedRequest.requesters.length - 3}</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* Pending requests */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        <h3 className="text-sm font-semibold text-white mb-2">
           Pending Requests ({pendingRequests.length})
         </h3>
         
         {pendingRequests.length === 0 ? (
-          <div className="text-center py-12 bg-gray-50 rounded-lg">
-            <Music className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">No pending requests</p>
-            <p className="text-sm text-gray-500 mt-1">
-              Requests will appear here as they come in
-            </p>
+          <div className="text-center py-6 glass-effect rounded-lg">
+            <Music className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+            <p className="text-gray-400 text-sm">No pending requests</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-2">
             {pendingRequests.map(request => (
               <RequestCard key={request.id} request={request} />
             ))}
@@ -397,18 +432,18 @@ export function QueueView({
         <div>
           <button
             onClick={() => setShowPlayedRequests(!showPlayedRequests)}
-            className="flex items-center gap-2 text-lg font-semibold text-gray-900 hover:text-gray-700 transition-colors mb-4"
+            className="flex items-center gap-1 text-sm font-semibold text-gray-300 hover:text-white transition-colors mb-2"
           >
             <span>Played Requests ({playedRequests.length})</span>
             {showPlayedRequests ? (
-              <ChevronUp className="w-5 h-5" />
+              <ChevronUp className="w-4 h-4" />
             ) : (
-              <ChevronDown className="w-5 h-5" />
+              <ChevronDown className="w-4 h-4" />
             )}
           </button>
           
           {showPlayedRequests && (
-            <div className="space-y-4">
+            <div className="space-y-2">
               {playedRequests.map(request => (
                 <RequestCard key={request.id} request={request} />
               ))}
