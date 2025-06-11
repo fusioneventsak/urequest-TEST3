@@ -566,7 +566,7 @@ function App() {
     } finally {
       requestInProgressRef.current = false;
     }
-  }, [reconnectRequests]);
+  }, [reconnectRequests, compressPhoto]);
 
   // Handle request vote with error handling
   const handleVoteRequest = useCallback(async (id: string): Promise<boolean> => {
@@ -850,4 +850,4 @@ function App() {
       toast.success('Set list created successfully');
       refreshSetLists(); // Refresh to get latest data
     } catch (error) {
-      console.error('Error creating set list:', error);
+      console.error('Error creating set
