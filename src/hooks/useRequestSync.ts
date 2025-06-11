@@ -168,6 +168,12 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
         retryCountRef.current = 0; // Reset retry count on success
       }
     } catch (error) {
+      // Handle AbortError specifically - this is expected during component unmount
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('🛑 Request gracefully aborted');
+        return;
+      }
+      
       if (signal?.aborted) {
         console.log('🛑 Request aborted');
         return;
