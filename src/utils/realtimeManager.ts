@@ -81,26 +81,8 @@ class EnhancedRealtimeManager {
   }
 
   private setupConnectionMonitoring(): void {
-    // Monitor Supabase realtime connection status
-    supabase.realtime.onOpen(() => {
-      console.log('🔗 Supabase realtime connection opened');
-      this.connectionStatus = 'connected';
-      this.reconnectAttempts = 0;
-      this.notifyConnectionListeners('connected');
-    });
-
-    supabase.realtime.onClose(() => {
-      console.log('🔗 Supabase realtime connection closed');
-      this.connectionStatus = 'disconnected';
-      this.notifyConnectionListeners('disconnected');
-      this.attemptReconnection();
-    });
-
-    supabase.realtime.onError((error) => {
-      console.error('🔗 Supabase realtime error:', error);
-      this.connectionStatus = 'disconnected';
-      this.notifyConnectionListeners('error');
-    });
+    // Connection monitoring is handled through individual channel subscriptions
+    // and the heartbeat mechanism rather than global realtime events
   }
 
   private startHeartbeat(): void {
