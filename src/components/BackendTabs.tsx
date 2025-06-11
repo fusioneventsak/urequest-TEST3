@@ -1,3 +1,4 @@
+// src/components/BackendTabs.tsx
 import React, { useState } from 'react';
 import { LayoutDashboard, Users, Music as BookMusic, ListMusic, Cog, Settings } from 'lucide-react';
 
