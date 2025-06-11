@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { ThumbsUp, Lock, CheckCircle2, ChevronDown, ChevronUp, Users, UserCircle } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 import { useUiSettings } from '../hooks/useUiSettings';
+import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
-import toast from 'react-hot-toast';
 import type { SongRequest } from '../types';
 
 interface QueueViewProps {
@@ -25,6 +25,7 @@ export function QueueView({ requests, onLockRequest, onMarkPlayed, onResetQueue 
   const [lockingStates, setLockingStates] = useState<Set<string>>(new Set());
   const [expandedRequests, setExpandedRequests] = useState<Set<string>>(new Set());
   const [isResetting, setIsResetting] = useState(false);
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
   const [optimisticLocks, setOptimisticLocks] = useState<Set<string>>(new Set());
   
   // Track if component is mounted
@@ -60,6 +61,7 @@ export function QueueView({ requests, onLockRequest, onMarkPlayed, onResetQueue 
   
   const { settings } = useUiSettings();
   const accentColor = settings?.frontend_accent_color || '#ff00ff';
+  const secondaryColor = settings?.frontend_secondary_accent || '#9d00ff';
   
   // Auto-expand requests based on UI settings
   useEffect(() => {
@@ -274,15 +276,28 @@ export function QueueView({ requests, onLockRequest, onMarkPlayed, onResetQueue 
   // Handle queue reset with confirmation
   const handleResetQueue = async () => {
     if (!onResetQueue) return;
+    setIsConfirmingReset(false);
     
-    if (window.confirm('Are you sure you want to clear all pending requests and votes? This will also reset any rate limits.')) {
-      setIsResetting(true);
-      try {
-        await onResetQueue();
-      } finally {
-        setIsResetting(false);
-      }
+    setIsResetting(true);
+    try {
+      await onResetQueue();
+      toast.success('Queue cleared successfully');
+    } catch (error) {
+      console.error('Error clearing queue:', error);
+      toast.error('Failed to clear queue. Please try again.');
+    } finally {
+      setIsResetting(false);
     }
+  };
+
+  // Show confirmation dialog
+  const showResetConfirmation = () => {
+    setIsConfirmingReset(true);
+  };
+
+  // Cancel reset
+  const cancelReset = () => {
+    setIsConfirmingReset(false);
   };
 
   return (
@@ -293,9 +308,9 @@ export function QueueView({ requests, onLockRequest, onMarkPlayed, onResetQueue 
           <div className="text-sm text-gray-400">
             Priority = Requesters + Upvotes
           </div>
-          {onResetQueue && (
+          {onResetQueue && !isConfirmingReset && (
             <button
-              onClick={handleResetQueue}
+              onClick={showResetConfirmation}
               disabled={isResetting}
               className={`px-4 py-2 text-sm text-red-400 hover:bg-red-400/20 rounded-md transition-colors ${
                 isResetting ? 'opacity-50 cursor-not-allowed' : ''
@@ -303,6 +318,30 @@ export function QueueView({ requests, onLockRequest, onMarkPlayed, onResetQueue 
             >
               {isResetting ? 'Clearing...' : 'Clear Queue'}
             </button>
+          )}
+          {isConfirmingReset && (
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-red-400">Are you sure?</span>
+              <button
+                onClick={handleResetQueue}
+                className="px-3 py-1 text-xs bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
+              >
+                Yes, Clear All
+              </button>
+              <button
+                onClick={cancelReset}
+                className="px-3 py-1 text-xs bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          {isResetting ? (
+            <div className="flex items-center justify-center space-x-2">
+              <div className="w-5 h-5 border-2 border-neon-pink border-t-transparent rounded-full animate-spin"></div>
+              <span>Clearing queue...</span>
+            </div>
+          ) : (
+            'No pending requests in the queue'
           )}
         </div>
       </div>
