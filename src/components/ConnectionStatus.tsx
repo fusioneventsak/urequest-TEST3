@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Wifi, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useConnectionHealth } from '../hooks/useConnectionHealth';
 
@@ -10,6 +10,11 @@ interface ConnectionStatusProps {
 
 export function ConnectionStatus({ className = '', showDetails = false, showAlways = false }: ConnectionStatusProps) {
   const { status, reconnectAttempts, reconnect } = useConnectionHealth();
+
+  // Wrap the reconnect function to handle the click event
+  const handleReconnect = useCallback(() => {
+    reconnect();
+  }, [reconnect]);
   
   if (status === 'good' && !showDetails && !showAlways) {
     return null; // Don't show anything when connection is good
@@ -26,7 +31,7 @@ export function ConnectionStatus({ className = '', showDetails = false, showAlwa
       
       {status === 'poor' && (
         <button 
-          onClick={reconnect}
+          onClick={handleReconnect}
           className="flex items-center text-yellow-400 text-xs bg-yellow-400/10 px-2 py-1 rounded-md"
           title="Connection quality is poor. Click to reconnect."
         >
@@ -38,7 +43,7 @@ export function ConnectionStatus({ className = '', showDetails = false, showAlwa
       
       {status === 'disconnected' && (
         <button
-          onClick={reconnect}
+          onClick={handleReconnect}
           className="flex items-center text-red-400 text-xs bg-red-400/10 px-2 py-1 rounded-md"
           title="Connection lost. Click to reconnect."
         >
