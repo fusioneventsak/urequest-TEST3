@@ -21,8 +21,6 @@ export function UpvoteList({ requests, onVote, currentUserId }: UpvoteListProps)
   const [votedRequests, setVotedRequests] = useState<Set<string>>(new Set());
   const [optimisticVotes, setOptimisticVotes] = useState<Map<string, number>>(new Map());
   
-  const currentUserId = currentUserId;
-  
   // Debug log to see what props we're getting
   useEffect(() => {
     console.log('🔍 UpvoteList Debug:', {
