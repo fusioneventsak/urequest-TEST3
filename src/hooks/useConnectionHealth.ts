@@ -6,7 +6,7 @@ import { toast } from 'react-hot-toast';
  * Custom hook to monitor connection health and auto-reconnect when needed
  */
 export function useConnectionHealth() {
-  const [status, setStatus] = useState<'good' | 'poor' | 'disconnected'>('good');
+  const [status, setStatus] = useState<'good' | 'disconnected'>('good');
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
   const [reconnectAttempts, setReconnectAttempts] = useState<number>(0);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
@@ -33,25 +33,21 @@ export function useConnectionHealth() {
       const now = Date.now();
       const lastUpdate = lastUpdateTimeRef.current;
       
-      if (now - lastUpdate > 15000) { // No updates for 15 seconds
-        setStatus('poor');
-        
-        // Auto-reconnect if no updates for 30 seconds
-        if (now - lastUpdate > 30000 && !isReconnecting) {
-          console.warn('No updates received for 30 seconds, attempting reconnection');
-          setIsReconnecting(true);
-          enhancedRealtimeManager.reconnect()
-            .then(() => {
-              setIsReconnecting(false);
-              if (statusRef.current === 'disconnected') {
-                toast.success('Connection restored');
-              }
-            })
-            .catch(() => {
-              setIsReconnecting(false);
-            });
-          setReconnectAttempts(prev => prev + 1);
-        }
+      // Auto-reconnect if no updates for 30 seconds
+      if (now - lastUpdate > 30000 && !isReconnecting) {
+        console.warn('No updates received for 30 seconds, attempting reconnection');
+        setIsReconnecting(true);
+        enhancedRealtimeManager.reconnect()
+          .then(() => {
+            setIsReconnecting(false);
+            if (statusRef.current === 'disconnected') {
+              toast.success('Connection restored');
+            }
+          })
+          .catch(() => {
+            setIsReconnecting(false);
+          });
+        setReconnectAttempts(prev => prev + 1);
       } else {
         setStatus('good');
       }
@@ -68,10 +64,8 @@ export function useConnectionHealth() {
         setStatus('disconnected');
         toast.error('Connection lost. Using cached data.');
       } else if (state === 'error') {
-        setStatus('poor');
-        if (reconnectAttempts === 0) {
-          toast.error('Connection issues detected');
-        }
+        setStatus('disconnected');
+        toast.error('Connection error. Using cached data.');
       }
     };
     
