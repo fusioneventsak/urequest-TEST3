@@ -68,7 +68,7 @@ function App() {
   
   // Initialize data synchronization
   const { isLoading: isFetchingSongs } = useSongSync(setSongs);
-  const { isLoading: isFetchingRequests, reconnect: reconnectRequests } = useRequestSync(setRequests);
+  const { isLoading: isFetchingRequests, reconnect: reconnectRequests } = useFastRequestSync(setRequests);
   const { isLoading: isFetchingSetLists, refetch: refreshSetLists } = useSetListSync(setSetLists);
 
   // Enhanced photo compression function with aggressive compression for database storage
@@ -439,6 +439,7 @@ function App() {
     
     try {
       console.log('Submitting request:', data);
+      const startTime = Date.now();
       
       // Enhanced photo size validation for database storage
       if (data.userPhoto && data.userPhoto.startsWith('data:')) {
@@ -451,75 +452,25 @@ function App() {
         }
       }
 
-      // First check if the song is already requested - use maybeSingle() instead of single()
-      const { data: existingRequest, error: checkError } = await supabase
-        .from('requests')
-        .select('id, title')
-        .eq('title', data.title)
-        .eq('is_played', false)
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
-        throw checkError;
-      }
-
-      let requestId: string;
-
-      if (existingRequest) {
-        // For kiosk mode, we always add a new requester even if song is already requested
-        requestId = existingRequest.id;
-        
-        // Add requester to existing request
-        const { error: requesterError } = await supabase
-          .from('requesters')
-          .insert({
-            request_id: requestId,
-            name: data.requestedBy,
-            photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
-            message: data.message?.trim().slice(0, 100) || '',
-            created_at: new Date().toISOString()
-          });
-
-        if (requesterError) throw requesterError;
-      } else {
-        // Create new request
-        const { data: newRequest, error: requestError } = await supabase
-          .from('requests')
-          .insert({
-            title: data.title,
-            artist: data.artist || '',
-            votes: 0,
-            status: 'pending',
-            is_locked: false,
-            is_played: false,
-            created_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-
-        if (requestError) throw requestError;
-        if (!newRequest) throw new Error('Failed to create request');
-
-        requestId = newRequest.id;
-
-        // Add requester to the new request
-        const { error: requesterError } = await supabase
-          .from('requesters')
-          .insert({
-            request_id: requestId,
-            name: data.requestedBy,
-            photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
-            message: data.message?.trim().slice(0, 100) || '',
-            created_at: new Date().toISOString()
-          });
-
-        if (requesterError) throw requesterError;
-      }
+      // Use the ultra-fast atomic database function
+      const { error } = await supabase.rpc('submit_request_with_requester', {
+        request_id: crypto.randomUUID(),
+        song_title: data.title,
+        song_artist: data.artist || '',
+        requester_name: data.requestedBy,
+        requester_photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
+        requester_message: data.message?.trim().slice(0, 100) || '',
+        created_at: new Date().toISOString()
+      });
+      
+      if (error) throw error;
 
       // Reset retry count on success
       requestRetriesRef.current = 0;
       
-      toast.success('Your request has been added to the queue!');
+      const submitTime = Date.now() - startTime;
+      console.log(`⚡ Request submitted in ${submitTime}ms`);
+      toast.success(`✅ Request added to queue! (${submitTime}ms)`);
       return true;
     } catch (error) {
       console.error('Error submitting request:', error);
@@ -568,63 +519,79 @@ function App() {
     }
   }, [reconnectRequests, generateDefaultAvatar]);
 
+  // Handle resetting the request queue
+  const handleResetQueue = useCallback(async () => {
+    if (!isOnline) {
+      toast.error('Cannot reset queue while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      console.log('🚀 Starting ultra-fast queue reset...');
+      const startTime = Date.now();
+      
+      // Use the ultra-fast atomic database function
+      const { data, error } = await supabase.rpc('ultra_fast_reset_queue', {
+        p_set_list_id: activeSetList?.id || null,
+        p_reset_type: 'manual'
+      });
+      
+      if (error) throw error;
+      
+      const resetTime = Date.now() - startTime;
+      console.log(`⚡ Queue reset completed in ${resetTime}ms`);
+      
+      if (data && data.length > 0) {
+        const result = data[0];
+        if (result.success) {
+          toast.success(`✅ ${result.message} (${resetTime}ms)`);
+        } else {
+          toast.error(result.message);
+        }
+      } else {
+        toast.success(`Queue cleared and rate limits reset (${resetTime}ms)`);
+      }
+      
+    } catch (error) {
+      console.error('Error resetting queue:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to clear queue. Please try again.');
+      }
+    }
+  }, [activeSetList, isOnline]);
+
   // Handle request vote with error handling
   const handleVoteRequest = useCallback(async (id: string): Promise<boolean> => {
     if (!isOnline) {
-      toast.error('Cannot vote while offline. Please check your internet connection.');
+      toast.error('Cannot vote while offline.');
       return false;
     }
     
     try {
       if (!currentUser || !currentUser.id) {
-        throw new Error('You must be logged in to vote');
+        throw new Error('You must be logged in to vote.');
       }
 
-      // Check if user already voted
-      const { data: existingVote, error: checkError } = await supabase
-        .from('user_votes')
-        .select('id')
-        .eq('request_id', id)
-        .eq('user_id', currentUser.id || currentUser.name)
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
-        throw checkError;
-      }
-
-      if (existingVote) {
-        toast.error('You have already voted for this request');
+      // Use the atomic vote function
+      const { data, error } = await supabase.rpc('add_vote', {
+        p_request_id: id,
+        p_user_id: currentUser.id || currentUser.name
+      });
+      
+      if (error) throw error;
+      
+      // If data is false, user already voted
+      if (data === false) {
+        toast.error('You have already voted for this request.');
         return false;
       }
-
-      // Get current votes
-      const { data, error: getError } = await supabase
-        .from('requests')
-        .select('votes')
-        .eq('id', id)
-        .single();
-        
-      if (getError) throw getError;
-      
-      // Update votes count
-      const currentVotes = data?.votes || 0;
-      const { error: updateError } = await supabase
-        .from('requests')
-        .update({ votes: currentVotes + 1 })
-        .eq('id', id);
-        
-      if (updateError) throw updateError;
-      
-      // Record vote to prevent duplicates
-      const { error: voteError } = await supabase
-        .from('user_votes')
-        .insert({
-          request_id: id,
-          user_id: currentUser.id || currentUser.name,
-          created_at: new Date().toISOString()
-        });
-        
-      if (voteError) throw voteError;
         
       toast.success('Vote added!');
       return true;
@@ -650,55 +617,31 @@ function App() {
   // Handle locking a request (marking it as next)
   const handleLockRequest = useCallback(async (id: string) => {
     if (!isOnline) {
-      toast.error('Cannot update requests while offline. Please check your internet connection.');
-      return;
+      toast.error('Cannot update requests while offline.');
+      return false;
     }
     
     try {
-      const requestToUpdate = requests.find(r => r.id === id);
-      if (!requestToUpdate) return;
-      
-      // Toggle the locked status
-      const newLockedState = !requestToUpdate.isLocked;
-      
-      // If locking, unlock all others first
-      if (newLockedState) {
-        const { error: unlockError } = await supabase
-          .from('requests')
-          .update({ is_locked: false })
-          .neq('id', id);
-          
-        if (unlockError) throw unlockError;
-      }
-      
-      // Update this request's lock status
-      const { error } = await supabase
-        .from('requests')
-        .update({ is_locked: newLockedState })
-        .eq('id', id);
-        
+      // Use the atomic database function for better performance
+      const { error } = await supabase.rpc('lock_request', { 
+        request_id: id 
+      });
+
       if (error) throw error;
       
-      toast.success(newLockedState ? 'Request locked as next song' : 'Request unlocked');
+      toast.success('Request locked as next song!');
+      return true;
     } catch (error) {
-      console.error('Error toggling request lock:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to update request. Please try again.');
-      }
+      console.error('Error locking request:', error);
+      toast.error('Failed to lock request. Please try again.');
+      return false;
     }
-  }, [requests, isOnline]);
+  }, [isOnline]);
 
   // Handle marking a request as played
   const handleMarkPlayed = useCallback(async (id: string) => {
     if (!isOnline) {
-      toast.error('Cannot update requests while offline. Please check your internet connection.');
+      toast.error('Cannot update requests while offline.');
       return;
     }
     
@@ -729,81 +672,6 @@ function App() {
       }
     }
   }, [isOnline]);
-
-  // Handle resetting the request queue
-  const handleResetQueue = useCallback(async () => {
-    if (!isOnline) {
-      toast.error('Cannot reset queue while offline. Please check your internet connection.');
-      return;
-    }
-    
-    try {
-      // Count requests to be cleared
-      const pendingRequests = requests.filter(r => !r.isPlayed).length;
-      
-      // Reset all pending requests
-      const { error } = await supabase
-        .from('requests')
-        .update({ 
-          is_played: true,
-          is_locked: false,
-          votes: 0
-        })
-        .eq('is_played', false);
-        
-      if (error) throw error;
-      
-      // Log the reset
-      const { error: logError } = await supabase
-        .from('queue_reset_logs')
-        .insert({
-          set_list_id: activeSetList?.id,
-          reset_type: 'manual',
-          requests_cleared: pendingRequests
-        });
-        
-      if (logError) console.error('Error logging queue reset:', logError);
-
-      // Clear rate limits with proper WHERE clause
-      const { error: votesError } = await supabase
-        .from('user_votes')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000');
-        
-      if (votesError) console.error('Error clearing vote limits:', votesError);
-      
-      toast.success('Request queue cleared and rate limits reset');
-    } catch (error) {
-      console.error('Error resetting queue:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to clear queue. Please try again.');
-      }
-    }
-  }, [requests, activeSetList, isOnline]);
-
-  // Handle adding a new song
-  const handleAddSong = useCallback((song: Omit<Song, 'id'>) => {
-    setSongs(prev => [...prev, { ...song, id: uuidv4() }]);
-  }, []);
-
-  // Handle updating a song
-  const handleUpdateSong = useCallback((updatedSong: Song) => {
-    setSongs(prev => prev.map(song => 
-      song.id === updatedSong.id ? updatedSong : song
-    ));
-  }, []);
-
-  // Handle deleting a song
-  const handleDeleteSong = useCallback((id: string) => {
-    setSongs(prev => prev.filter(song => song.id !== id));
-  }, []);
 
   // Handle creating a new set list
   const handleCreateSetList = useCallback(async (newSetList: Omit<SetList, 'id'>) => {
@@ -938,7 +806,7 @@ function App() {
     }
     
     try {
-      // Set list songs will be deleted via cascade
+      // Delete the set list (cascade will handle related records)
       const { error } = await supabase
         .from('set_lists')
         .delete()
@@ -947,6 +815,7 @@ function App() {
       if (error) throw error;
       
       toast.success('Set list deleted successfully');
+      refreshSetLists(); // Refresh to get latest data
     } catch (error) {
       console.error('Error deleting set list:', error);
       
@@ -960,279 +829,21 @@ function App() {
         toast.error('Failed to delete set list. Please try again.');
       }
     }
-  }, [isOnline]);
+  }, [refreshSetLists, isOnline]);
 
-  // Handle activating/deactivating a set list
-  const handleSetActive = useCallback(async (id: string) => {
-    if (!isOnline) {
-      toast.error('Cannot update set list while offline. Please check your internet connection.');
-      return;
-    }
-    
-    try {
-      // Get the current set list
-      const setList = setLists.find(sl => sl.id === id);
-      if (!setList) return;
-      
-      // Toggle active state
-      const newActiveState = !setList.isActive;
-      
-      // Update in database (using snake_case for database field names)
-      const { error } = await supabase
-        .from('set_lists')
-        .update({ is_active: newActiveState })
-        .eq('id', id);
-        
-      if (error) throw error;
-      
-      toast.success(newActiveState 
-        ? 'Set list activated successfully' 
-        : 'Set list deactivated successfully');
-        
-      // Force refresh set lists to ensure we get latest data with proper isActive state
-      refreshSetLists();
-    } catch (error) {
-      console.error('Error toggling set list active state:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to update set list. Please try again.');
-      }
-    }
-  }, [setLists, refreshSetLists, isOnline]);
+  // Handle adding a new song
+  const handleAddSong = useCallback((song: Omit<Song, 'id'>) => {
+    setSongs(prev => [...prev, { ...song, id: uuidv4() }]);
+  }, []);
 
-  // Handle updating logo URL
-  const handleLogoUpdate = useCallback(async (url: string) => {
-    if (!isOnline) {
-      toast.error('Cannot update logo while offline. Please check your internet connection.');
-      return;
-    }
-    
-    try {
-      await updateSettings({
-        band_logo_url: url,
-        updated_at: new Date().toISOString()
-      });
-      
-      toast.success('Logo updated successfully');
-    } catch (error) {
-      console.error('Error updating logo:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to update logo. Please try again.');
-      }
-    }
-  }, [updateSettings, isOnline]);
+  // Handle updating a song
+  const handleUpdateSong = useCallback((updatedSong: Song) => {
+    setSongs(prev => prev.map(song => 
+      song.id === updatedSong.id ? updatedSong : song
+    ));
+  }, []);
 
-  // Determine what page to show
-  if (isInitializing) {
-    return (
-      <div className="min-h-screen bg-darker-purple flex items-center justify-center">
-        <LoadingSpinner size="lg" message="Loading application..." />
-      </div>
-    );
-  }
-
-  // Show login page if accessing backend and not authenticated
-  if (isBackend && !isAdmin) {
-    return <BackendLogin onLogin={handleAdminLogin} />;
-  }
-
-  // Show kiosk page if accessing /kiosk
-  if (isKiosk) {
-    return (
-      <ErrorBoundary>
-        <KioskPage 
-          songs={songs}
-          requests={requests}
-          activeSetList={activeSetList}
-          logoUrl={settings?.band_logo_url || DEFAULT_BAND_LOGO}
-          onSubmitRequest={handleSubmitRequest}
-        />
-      </ErrorBoundary>
-    );
-  }
-
-  // Show backend if accessing /backend and authenticated
-  if (isBackend && isAdmin) {
-    // Define lockedRequest variable before using it
-    const lockedRequest = requests.find(r => r.isLocked && !r.isPlayed);
-    
-    return (
-      <ErrorBoundary>
-        <div className="min-h-screen bg-darker-purple">
-          <div className="max-w-7xl mx-auto p-4 sm:p-6">
-            <header className="mb-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between">
-                <div className="flex items-center mb-4 md:mb-0">
-                  <Logo 
-                    url={settings?.band_logo_url || DEFAULT_BAND_LOGO}
-                    className="h-12 mr-4"
-                  />
-                  <h1 className="text-3xl font-bold neon-text mb-2">
-                    Band Request Hub
-                  </h1>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  {!isOnline && (
-                    <div className="px-3 py-1 bg-red-500/20 text-red-400 rounded-md text-sm flex items-center">
-                      <span className="mr-1">●</span>
-                      Offline Mode
-                    </div>
-                  )}
-                  <ConnectionStatus showAlways={true} />
-                  <button 
-                    onClick={navigateToFrontend}
-                    className="neon-button"
-                  >
-                    Exit to Public View
-                  </button>
-                  <button 
-                    onClick={navigateToKiosk}
-                    className="neon-button"
-                  >
-                    Kiosk View
-                  </button>
-                  <button 
-                    onClick={handleAdminLogout}
-                    className="px-4 py-2 text-red-400 hover:bg-red-400/20 rounded-md flex items-center"
-                  >
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
-                  </button>
-                </div>
-              </div>
-              
-              <p className="text-gray-300 max-w-2xl mt-2 mb-4">
-                Manage your set lists, song library, and customize the request system all in one place.
-              </p>
-            </header>
-
-            <BackendTabs 
-              activeTab={activeBackendTab}
-              onTabChange={setActiveBackendTab}
-            />
-
-            <div className="space-y-8">
-              {activeBackendTab === 'requests' && (
-                <ErrorBoundary>
-                  <div className="glass-effect rounded-lg p-6">
-                    <h2 className="text-xl font-semibold neon-text mb-4">Current Request Queue</h2>
-                    <QueueView 
-                      requests={requests}
-                      onLockRequest={handleLockRequest}
-                      onMarkPlayed={handleMarkPlayed}
-                      onResetQueue={handleResetQueue}
-                    />
-                  </div>
-
-                  <ErrorBoundary>
-                    <TickerManager 
-                      nextSong={lockedRequest
-                        ? {
-                            title: lockedRequest.title,
-                            artist: lockedRequest.artist
-                          }
-                        : undefined
-                      }
-                      isActive={isTickerActive}
-                      customMessage={tickerMessage}
-                      onUpdateMessage={setTickerMessage}
-                      onToggleActive={() => setIsTickerActive(!isTickerActive)}
-                    />
-                  </ErrorBoundary>
-                </ErrorBoundary>
-              )}
-
-              {activeBackendTab === 'setlists' && (
-                <ErrorBoundary>
-                  <SetListManager 
-                    songs={songs}
-                    setLists={setLists}
-                    onCreateSetList={handleCreateSetList}
-                    onUpdateSetList={handleUpdateSetList}
-                    onDeleteSetList={handleDeleteSetList}
-                    onSetActive={handleSetActive}
-                  />
-                </ErrorBoundary>
-              )}
-
-              {activeBackendTab === 'songs' && (
-                <ErrorBoundary>
-                  <SongLibrary 
-                    songs={songs}
-                    onAddSong={handleAddSong}
-                    onUpdateSong={handleUpdateSong}
-                    onDeleteSong={handleDeleteSong}
-                  />
-                </ErrorBoundary>
-              )}
-
-              {activeBackendTab === 'settings' && (
-                <>
-                  <ErrorBoundary>
-                    <LogoManager 
-                      isAdmin={isAdmin}
-                      currentLogoUrl={settings?.band_logo_url || null}
-                      onLogoUpdate={handleLogoUpdate}
-                    />
-                  </ErrorBoundary>
-
-                  <ErrorBoundary>
-                    <ColorCustomizer isAdmin={isAdmin} />
-                  </ErrorBoundary>
-
-                  <ErrorBoundary>
-                    <SettingsManager />
-                  </ErrorBoundary>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </ErrorBoundary>
-    );
-  }
-
-  // Show landing page if no user is set up
-  if (!currentUser) {
-    return (
-      <ErrorBoundary>
-        <LandingPage onComplete={handleUserUpdate} />
-      </ErrorBoundary>
-    );
-  }
-
-  // Show main frontend
-  return (
-    <ErrorBoundary>
-      <UserFrontend 
-        songs={songs}
-        requests={requests}
-        activeSetList={activeSetList}
-        currentUser={currentUser}
-        onSubmitRequest={handleSubmitRequest}
-        onVoteRequest={handleVoteRequest}
-        onUpdateUser={handleUserUpdate}
-        logoUrl={settings?.band_logo_url || DEFAULT_BAND_LOGO}
-        isAdmin={isAdmin}
-        onLogoClick={onLogoClick}
-        onBackendAccess={navigateToBackend}
-      />
-    </ErrorBoundary>
-  );
-}
-
-export default App;
+  // Handle deleting a song
+  const handleDeleteSong = useCallback((id: string) => {
+    setSongs(prev => prev.filter(song => song.id !== id));
+  }, []);
