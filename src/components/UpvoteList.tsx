@@ -46,7 +46,7 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
 
   if (upvoteableRequests.length === 0) {
     return (
-      <div className="text-center py-12 bg-gray-900 min-h-screen">
+      <div className="text-center py-12 bg-darker-purple min-h-screen">
         <Star className="w-16 h-16 text-gray-500 mx-auto mb-4" />
         <h3 className="text-xl font-semibold text-gray-300 mb-2">No Requests to Vote On</h3>
         <p className="text-gray-400">
@@ -57,23 +57,22 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 p-4">
+    <div className="min-h-screen bg-darker-purple p-4">
       <div className="max-w-2xl mx-auto space-y-4">
         {upvoteableRequests.map((request) => {
           const isVoting = votingStates[request.id];
           const hasRequesters = request.requesters && request.requesters.length > 0;
 
           return (
-            <div key={request.id} className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
-              <div className="p-4">
-                <div className="flex items-center justify-between">
+            <div key={request.id} className="glass-effect rounded-lg p-4">
+              <div className="flex items-center justify-between">
                   {/* Song Details */}
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-semibold text-white truncate">
+                    <h3 className="font-medium text-white truncate">
                       {request.title}
                     </h3>
                     {request.artist && (
-                      <p className="text-gray-300 text-sm truncate">
+                      <p className="text-gray-300 truncate">
                         by {request.artist}
                       </p>
                     )}
@@ -81,73 +80,69 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
 
                   {/* Vote Button */}
                   <div className="flex-shrink-0">
-                    <Button
+                    <button
                       onClick={() => handleVote(request.id)}
                       disabled={!currentUser || isVoting || !isOnline}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 min-w-[80px] rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                      size="sm"
+                      className="p-1 hover:bg-neon-purple/20 rounded text-neon-pink disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                       {isVoting ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Voting...</span>
-                        </div>
+                        <>
+                          <div className="w-5 h-5 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
+                          <span className="font-medium text-white">Voting...</span>
+                        </>
                       ) : (
-                        <div className="flex items-center gap-1">
-                          <ChevronUp className="w-4 h-4" />
-                          <span>Vote</span>
-                        </div>
+                        <>
+                          <span className="font-medium text-white mr-2">{request.votes}</span>
+                          <ChevronUp className="w-5 h-5" />
+                        </>
                       )}
-                    </Button>
+                    </button>
                   </div>
                 </div>
 
-                {/* Avatars and Vote Count Section */}
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {/* Avatars */}
-                    {hasRequesters && (
-                      <div className="flex -space-x-2">
-                        {request.requesters.slice(0, 4).map((requester, index) => (
-                          <div key={index} className="relative">
-                            <img
-                              src={requester.photo}
-                              alt={requester.name}
-                              className="w-8 h-8 rounded-full border-2 border-gray-700 object-cover bg-gray-800"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.src = `data:image/svg+xml;base64,${btoa(`
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
-                                    <rect width="100" height="100" fill="#374151" />
-                                    <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
-                                          fill="#9ca3af" text-anchor="middle" dominant-baseline="central">
-                                      ${requester.name.charAt(0).toUpperCase()}
-                                    </text>
-                                  </svg>
-                                `)}`;
-                              }}
-                            />
-                          </div>
-                        ))}
-                        {request.requesters.length > 4 && (
-                          <div className="w-8 h-8 rounded-full border-2 border-gray-700 bg-gray-800 flex items-center justify-center">
-                            <span className="text-xs font-medium text-gray-400">
-                              +{request.requesters.length - 4}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Vote Count Text */}
-                    <div className="text-sm text-gray-400">
-                      {request.votes} {request.votes === 1 ? 'vote' : 'votes'}
-                      {hasRequesters && (
-                        <span className="ml-2">
-                          • {request.requesters.length} {request.requesters.length === 1 ? 'person' : 'people'}
-                        </span>
+                {/* Avatars and People Count Section */}
+                <div className="mt-4 flex items-center gap-3">
+                  {/* Avatars */}
+                  {hasRequesters && (
+                    <div className="flex -space-x-2">
+                      {request.requesters.slice(0, 4).map((requester, index) => (
+                        <div key={index} className="relative">
+                          <img
+                            src={requester.photo}
+                            alt={requester.name}
+                            className="w-8 h-8 rounded-full object-cover neon-border"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = `data:image/svg+xml;base64,${btoa(`
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+                                  <rect width="100" height="100" fill="#1a0b2e" />
+                                  <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
+                                        fill="#9d00ff" text-anchor="middle" dominant-baseline="central">
+                                    ${requester.name.charAt(0).toUpperCase()}
+                                  </text>
+                                </svg>
+                              `)}`;
+                            }}
+                          />
+                        </div>
+                      ))}
+                      {request.requesters.length > 4 && (
+                        <div className="w-8 h-8 rounded-full neon-border bg-dark-purple flex items-center justify-center">
+                          <span className="text-xs font-medium text-neon-purple">
+                            +{request.requesters.length - 4}
+                          </span>
+                        </div>
                       )}
                     </div>
+                  )}
+
+                  {/* People Count Text */}
+                  <div className="text-sm text-gray-400">
+                    {hasRequesters && (
+                      <span>
+                        {request.requesters.length} {request.requesters.length === 1 ? 'person' : 'people'}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
