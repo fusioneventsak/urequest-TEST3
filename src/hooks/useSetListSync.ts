@@ -11,7 +11,7 @@ const RETRY_DELAY = 1000; // 1 second base delay
 export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
+  const retryCountRef = useRef(0); // Changed from useState to useRef
   const mountedRef = useRef(true);
   const setListsSubscriptionRef = useRef<string | null>(null);
   const setListSongsSubscriptionRef = useRef<string | null>(null);
@@ -79,7 +79,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
 
         cacheService.setSetLists(SET_LISTS_CACHE_KEY, formattedSetLists);
         onUpdate(formattedSetLists);
-        setRetryCount(0); // Reset retry count on success
+        retryCountRef.current = 0; // Use ref instead of setState
       }
     } catch (error) {
       console.error('Error fetching set lists:', error);
@@ -95,9 +95,9 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
         }
         
         // Retry with exponential backoff
-        if (retryCount < MAX_RETRY_ATTEMPTS) {
-          const delay = RETRY_DELAY * Math.pow(2, retryCount);
-          console.log(`Retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRY_ATTEMPTS})`);
+        if (retryCountRef.current < MAX_RETRY_ATTEMPTS) {
+          const delay = RETRY_DELAY * Math.pow(2, retryCountRef.current);
+          console.log(`Retrying in ${delay}ms (attempt ${retryCountRef.current + 1}/${MAX_RETRY_ATTEMPTS})`);
           
           if (fetchTimeoutRef.current) {
             clearTimeout(fetchTimeoutRef.current);
@@ -105,7 +105,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
           
           fetchTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
-              setRetryCount(prev => prev + 1);
+              retryCountRef.current++; // Use ref instead of setState
               fetchSetLists(true);
             }
           }, delay);
@@ -117,7 +117,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
       }
       fetchInProgressRef.current = false;
     }
-  }, [onUpdate, retryCount]);
+  }, [onUpdate]); // Removed retryCount from dependencies
 
   // Setup realtime subscriptions
   useEffect(() => {

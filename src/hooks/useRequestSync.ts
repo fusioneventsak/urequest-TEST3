@@ -10,7 +10,6 @@ const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [lastFetchTime, setLastFetchTime] = useState(0);
   
   // Refs for cleanup and state tracking
   const mountedRef = useRef(true);
@@ -20,6 +19,7 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
   const lastDataRef = useRef<SongRequest[]>([]);
   const retryTimeoutRef = useRef<NodeJS.Timeout>();
   const retryCountRef = useRef(0);
+  const lastFetchTimeRef = useRef(0); // Changed from useState to useRef
   
   // Constants for retry logic
   const MAX_RETRIES = 5;
@@ -82,7 +82,7 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
       if (mountedRef.current) {
         lastDataRef.current = transformedRequests;
         onUpdate(transformedRequests);
-        setLastFetchTime(Date.now());
+        lastFetchTimeRef.current = Date.now(); // Use ref instead of setState
         setError(null);
         setIsLoading(false);
         retryCountRef.current = 0;
@@ -154,7 +154,7 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
     intervalRef.current = setInterval(() => {
       if (mountedRef.current) {
         // Only fetch if data is stale
-        const timeSinceLastFetch = Date.now() - lastFetchTime;
+        const timeSinceLastFetch = Date.now() - lastFetchTimeRef.current; // Use ref instead of state
         if (timeSinceLastFetch > STALE_THRESHOLD) {
           fetchRequests();
         }
@@ -187,7 +187,7 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
         channelRef.current.unsubscribe();
       }
     };
-  }, [fetchRequests, setupRealtimeSubscription, lastFetchTime]);
+  }, [fetchRequests, setupRealtimeSubscription]); // Removed lastFetchTime from dependencies
 
   // Reconnection handler
   const reconnect = useCallback(() => {
