@@ -87,25 +87,16 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
                   {/* Vote Button */}
                   <div className="flex-shrink-0">
                     <button
+                      type="button"
                       onClick={() => handleVote(request.id)}
                       disabled={!currentUser || isVoting || !isOnline}
-                      className="px-6 py-3 rounded-lg font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed border-2"
+                      className="px-6 py-3 rounded-lg font-semibold border-2 cursor-pointer"
                       style={{
                         backgroundColor: accentColor,
                         borderColor: accentColor,
-                        color: 'white'
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isVoting && currentUser && isOnline) {
-                          e.currentTarget.style.backgroundColor = `${accentColor}DD`;
-                          e.currentTarget.style.borderColor = `${accentColor}DD`;
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isVoting) {
-                          e.currentTarget.style.backgroundColor = accentColor;
-                          e.currentTarget.style.borderColor = accentColor;
-                        }
+                        color: 'white',
+                        opacity: (!currentUser || isVoting || !isOnline) ? 0.5 : 1,
+                        pointerEvents: (!currentUser || isVoting || !isOnline) ? 'none' : 'auto'
                       }}
                     >
                       {isVoting ? (
@@ -116,7 +107,7 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
                           <span>Voting...</span>
                         </div>
                       ) : (
-                        <span>Vote</span>
+                        <span>UPVOTE</span>
                       )}
                     </button>
                   </div>
