@@ -336,21 +336,6 @@ export function QueueView({ requests, onLockRequest, onMarkPlayed, onResetQueue 
               </button>
             </div>
           )}
-          {isResetting ? (
-            <div className="flex items-center justify-center space-x-2">
-              <div className="w-5 h-5 border-2 border-neon-pink border-t-transparent rounded-full animate-spin"></div>
-              <span>Clearing queue...</span>
-            </div>
-          ) : (
-            'No pending requests in the queue'
-          {isResetting ? (
-            <div className="flex items-center justify-center space-x-2">
-              <div className="w-5 h-5 border-2 border-neon-pink border-t-transparent rounded-full animate-spin"></div>
-              <span>Clearing queue...</span>
-            </div>
-          ) : (
-            'No pending requests in the queue'
-          )}
         </div>
       </div>
 
