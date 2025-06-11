@@ -2,17 +2,17 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Music4, ThumbsUp, UserCircle } from 'lucide-react';
 import { useUiSettings } from '../hooks/useUiSettings';
 import { supabase } from '../utils/supabase';
-import type { SongRequest } from '../types';
+import type { SongRequest, User } from '../types';
 import toast from 'react-hot-toast';
 
 interface UpvoteListProps {
   requests: SongRequest[];
+  currentUser: User | null;
   onVoteRequest: (id: string) => Promise<boolean>;
-  currentUser: { id?: string; name: string } | null;
   isOnline: boolean;
 }
 
-export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: UpvoteListProps) {
+export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: UpvoteListProps) {
   const { settings } = useUiSettings();
   const songBorderColor = settings?.song_border_color || settings?.frontend_accent_color || '#ff00ff';
   const accentColor = settings?.frontend_accent_color || '#ff00ff';
@@ -20,7 +20,6 @@ export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: U
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [votedRequests, setVotedRequests] = useState<Set<string>>(new Set());
-  const [isLoading, setIsLoading] = useState(true);
   const [optimisticVotes, setOptimisticVotes] = useState<Map<string, number>>(new Map());
   
   const currentUserId = currentUser?.id || currentUser?.name || '';
@@ -51,13 +50,15 @@ export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: U
     }
   }, [requests, optimisticVotes]);
 
-  // Fetch user's votes
+  // Fetch user's votes (only if we have a current user)
   useEffect(() => {
     const fetchUserVotes = async () => {
-      if (!currentUserId) return;
+      if (!currentUserId) {
+        setVotedRequests(new Set());
+        return;
+      }
 
       try {
-        setIsLoading(true);
         const { data: votes, error } = await supabase
           .from('user_votes')
           .select('request_id')
@@ -70,8 +71,8 @@ export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: U
         }
       } catch (error) {
         console.error('Error fetching user votes:', error);
-      } finally {
-        setIsLoading(false);
+        // Don't block the UI if vote fetching fails
+        setVotedRequests(new Set());
       }
     };
 
@@ -126,16 +127,11 @@ export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: U
       // Update local voted state
       setVotedRequests(prev => new Set([...prev, id]));
       
-      // Make the actual API call using the atomic function
-      const { data, error } = await supabase.rpc('add_vote', {
-        p_request_id: id,
-        p_user_id: currentUserId
-      });
-
-      if (error) throw error;
-
-      if (data === false) {
-        // Already voted - revert optimistic updates
+      // Use the onVoteRequest prop to handle the actual voting
+      const success = await onVoteRequest(id);
+      
+      if (!success) {
+        // Revert optimistic updates if voting failed
         setOptimisticVotes(prev => {
           const newMap = new Map(prev);
           newMap.delete(id);
@@ -147,8 +143,6 @@ export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: U
           newSet.delete(id);
           return newSet;
         });
-        
-        toast.error('You have already voted for this request');
       }
     } catch (error) {
       console.error('Error recording vote:', error);
@@ -193,14 +187,6 @@ export function UpvoteList({ requests, onVoteRequest, currentUser, isOnline }: U
         return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       });
   }, [requests, optimisticVotes]);
-
-  if (isLoading) {
-    return (
-      <div className="text-center py-8 text-gray-400">
-        Loading votes...
-      </div>
-    );
-  }
 
   if (activeRequests.length === 0) {
     return (
