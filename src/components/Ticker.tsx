@@ -2,12 +2,24 @@ import React, { useState, useEffect } from 'react';
 import type { SongRequest } from '../types';
 
 interface TickerProps {
-  requests: SongRequest[];
+  requests?: SongRequest[];
   customMessage?: string;
   isActive?: boolean;
+  nextSong?: {
+    title: string;
+    artist?: string;
+    albumArtUrl?: string;
+  };
+  showInBackend?: boolean;
 }
 
-export function Ticker({ requests, customMessage, isActive = true }: TickerProps) {
+export function Ticker({ 
+  requests = [], 
+  customMessage, 
+  isActive = true, 
+  nextSong,
+  showInBackend = false 
+}: TickerProps) {
   const [currentMessage, setCurrentMessage] = useState('');
 
   useEffect(() => {
@@ -18,6 +30,19 @@ export function Ticker({ requests, customMessage, isActive = true }: TickerProps
 
     if (customMessage) {
       setCurrentMessage(customMessage);
+      return;
+    }
+
+    // If we have a nextSong prop (for backend usage), use that
+    if (nextSong) {
+      const artistText = nextSong.artist ? ` by ${nextSong.artist}` : '';
+      setCurrentMessage(`🎵 Next up: ${nextSong.title}${artistText}`);
+      return;
+    }
+
+    // Ensure requests is an array before using array methods
+    if (!Array.isArray(requests)) {
+      setCurrentMessage('🎶 Send in your song requests!');
       return;
     }
 
@@ -38,7 +63,7 @@ export function Ticker({ requests, customMessage, isActive = true }: TickerProps
         setCurrentMessage('🎶 Send in your song requests!');
       }
     }
-  }, [requests, customMessage, isActive]);
+  }, [requests, customMessage, isActive, nextSong]);
 
   if (!isActive || !currentMessage) {
     return null;
