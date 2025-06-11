@@ -24,10 +24,16 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
   
   const currentUserId = currentUser?.id || currentUser?.name || '';
   
-  // Debug log when requests change
+  // Debug log to see what props we're getting
   useEffect(() => {
-    console.log('🔄 UpvoteList requests updated:', requests.length, requests.map(r => r.id));
-  }, [requests]);
+    console.log('🔍 UpvoteList Debug:', {
+      currentUser,
+      isOnline,
+      currentUserId,
+      hasCurrentUser: !!currentUser,
+      requestsCount: requests.length
+    });
+  }, [currentUser, isOnline, currentUserId, requests.length]);
 
   // Clear optimistic votes when real data arrives
   useEffect(() => {
@@ -106,7 +112,22 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
     e.preventDefault();
     e.stopPropagation();
 
-    if (!currentUserId || votedRequests.has(id)) return;
+    console.log('🔥 Vote button clicked!', { id, currentUser, isOnline, currentUserId });
+
+    if (!currentUser) {
+      toast.error('Please log in to vote');
+      return;
+    }
+
+    if (!isOnline) {
+      toast.error('Cannot vote while offline');
+      return;
+    }
+
+    if (votedRequests.has(id)) {
+      toast.error('You have already voted for this request');
+      return;
+    }
 
     try {
       // Find the current request
@@ -311,15 +332,20 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
 
                 <button
                   onClick={(e) => handleVote(request.id, e)}
-                  disabled={hasVoted || !currentUser || !isOnline}
+                  disabled={hasVoted}
                   className={`px-2 py-1.5 rounded-lg transition-all duration-200 flex items-center gap-1 font-semibold flex-shrink-0 text-white text-xs ${
-                    hasVoted || !currentUser || !isOnline ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-90'
+                    hasVoted ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-90 cursor-pointer'
                   }`}
                   style={{ 
                     backgroundColor: hasVoted ? '#666' : accentColor,
                     border: `1px solid ${hasVoted ? '#666' : accentColor}`,
                   }}
-                  title={hasVoted ? 'Already voted' : 'Upvote this request'}
+                  title={
+                    hasVoted ? 'Already voted' : 
+                    !currentUser ? 'Please log in to vote' :
+                    !isOnline ? 'Offline - cannot vote' :
+                    'Upvote this request'
+                  }
                 >
                   <ThumbsUp className="w-3 h-3" />
                   <span>{hasVoted ? 'VOTED' : 'UPVOTE'}</span>
