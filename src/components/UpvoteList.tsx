@@ -66,84 +66,83 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
           return (
             <div key={request.id} className="glass-effect rounded-lg p-4">
               <div className="flex items-center justify-between">
-                  {/* Song Details */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-white truncate">
-                      {request.title}
-                    </h3>
-                    {request.artist && (
-                      <p className="text-gray-300 truncate">
-                        by {request.artist}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Vote Button */}
-                  <div className="flex-shrink-0">
-                    <button
-                      onClick={() => handleVote(request.id)}
-                      disabled={!currentUser || isVoting || !isOnline}
-                      className="p-1 hover:bg-neon-purple/20 rounded text-neon-pink disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      {isVoting ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
-                          <span className="font-medium text-white">Voting...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-medium text-white mr-2">{request.votes}</span>
-                          <ChevronUp className="w-5 h-5" />
-                        </>
-                      )}
-                    </button>
-                  </div>
+                {/* Song Details */}
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-medium text-white truncate">
+                    {request.title}
+                  </h3>
+                  {request.artist && (
+                    <p className="text-gray-300 truncate">
+                      by {request.artist}
+                    </p>
+                  )}
                 </div>
 
-                {/* Avatars and People Count Section */}
-                <div className="mt-4 flex items-center gap-3">
-                  {/* Avatars */}
-                  {hasRequesters && (
-                    <div className="flex -space-x-2">
-                      {request.requesters.slice(0, 4).map((requester, index) => (
-                        <div key={index} className="relative">
-                          <img
-                            src={requester.photo}
-                            alt={requester.name}
-                            className="w-8 h-8 rounded-full object-cover neon-border"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = `data:image/svg+xml;base64,${btoa(`
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
-                                  <rect width="100" height="100" fill="#1a0b2e" />
-                                  <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
-                                        fill="#9d00ff" text-anchor="middle" dominant-baseline="central">
-                                    ${requester.name.charAt(0).toUpperCase()}
-                                  </text>
-                                </svg>
-                              `)}`;
-                            }}
-                          />
-                        </div>
-                      ))}
-                      {request.requesters.length > 4 && (
-                        <div className="w-8 h-8 rounded-full neon-border bg-dark-purple flex items-center justify-center">
-                          <span className="text-xs font-medium text-neon-purple">
-                            +{request.requesters.length - 4}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                {/* Vote Button */}
+                <div className="flex-shrink-0">
+                  <button
+                    onClick={() => handleVote(request.id)}
+                    disabled={!currentUser || isVoting || !isOnline}
+                    className="p-1 hover:bg-neon-purple/20 rounded text-neon-pink disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isVoting ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
+                        <span className="font-medium text-white">Voting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium text-white mr-2">{request.votes}</span>
+                        <ChevronUp className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
 
-                  {/* People Count Text */}
-                  <div className="text-sm text-gray-400">
-                    {hasRequesters && (
-                      <span>
-                        {request.requesters.length} {request.requesters.length === 1 ? 'person' : 'people'}
-                      </span>
+              {/* Avatars and People Count Section */}
+              <div className="mt-4 flex items-center gap-3">
+                {/* Avatars */}
+                {hasRequesters && (
+                  <div className="flex -space-x-2">
+                    {request.requesters.slice(0, 4).map((requester, index) => (
+                      <div key={index} className="relative">
+                        <img
+                          src={requester.photo}
+                          alt={requester.name}
+                          className="w-8 h-8 rounded-full object-cover neon-border"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.src = `data:image/svg+xml;base64,${btoa(`
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+                                <rect width="100" height="100" fill="#1a0b2e" />
+                                <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
+                                      fill="#9d00ff" text-anchor="middle" dominant-baseline="central">
+                                  ${requester.name.charAt(0).toUpperCase()}
+                                </text>
+                              </svg>
+                            `)}`;
+                          }}
+                        />
+                      </div>
+                    ))}
+                    {request.requesters.length > 4 && (
+                      <div className="w-8 h-8 rounded-full neon-border bg-dark-purple flex items-center justify-center">
+                        <span className="text-xs font-medium text-neon-purple">
+                          +{request.requesters.length - 4}
+                        </span>
+                      </div>
                     )}
                   </div>
+                )}
+
+                {/* People Count Text */}
+                <div className="text-sm text-gray-400">
+                  {hasRequesters && (
+                    <span>
+                      {request.requesters.length} {request.requesters.length === 1 ? 'person' : 'people'}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
