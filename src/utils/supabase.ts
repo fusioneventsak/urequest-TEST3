@@ -1,5 +1,6 @@
 // src/utils/supabase.ts
 import { createClient } from '@supabase/supabase-js';
+import { backOff } from 'exponential-backoff';
 
 // Validate environment variables
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -8,6 +9,32 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
+
+// Configure retry options
+const RETRY_OPTIONS = {
+  numOfAttempts: 3,
+  startingDelay: 1000,
+  timeMultiple: 2,
+  maxDelay: 10000,
+  retry: (error: any) => {
+    // Only retry on network errors or 5xx server errors
+    const isNetworkError = error.message?.includes('Failed to fetch') || 
+                          error.message?.includes('NetworkError') ||
+                          error.message?.includes('network');
+    const isServerError = error.status >= 500 && error.status < 600;
+    return isNetworkError || isServerError;
+  }
+};
+
+// Custom fetch function with retry logic
+const fetchWithRetry = async (url: string, options: RequestInit) => {
+  try {
+    return await backOff(() => fetch(url, options), RETRY_OPTIONS);
+  } catch (error) {
+    console.error('Fetch failed after retries:', error);
+    throw error;
+  }
+};
 
 // Create Supabase client with improved configuration
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -18,7 +45,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     headers: {
-      'X-Client-Info': 'song-request-app/1.0.1',
+      'X-Client-Info': 'song-request-app/1.0.2',
     },
   },
   realtime: {
@@ -32,7 +59,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     schema: 'public'
   },
   // Add request timeouts to prevent hanging requests
-  fetch: (url, options) => {
+  fetch: async (url, options) => {
     const controller = new AbortController();
     const { signal } = controller;
     
@@ -41,15 +68,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       controller.abort();
     }, 15000);
     
-    return fetch(url, { ...options, signal })
-      .then(response => {
-        clearTimeout(timeoutId);
-        return response;
-      })
-      .catch(error => {
-        clearTimeout(timeoutId);
-        throw error;
-      });
+    try {
+      // Use our custom fetch with retry logic
+      const response = await fetchWithRetry(url, { ...options, signal });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
   }
 });
 
@@ -76,7 +103,9 @@ export async function executeDbOperation<T>(
 
     // Check network status
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      throw new Error('No network connection available');
+      // Instead of throwing immediately, try the operation anyway
+      // It might work on flaky connections where navigator.onLine is unreliable
+      console.warn('Network appears to be offline, but trying operation anyway');
     }
 
     // Add timeout protection
@@ -126,7 +155,10 @@ export async function executeDbOperation<T>(
         error.message?.includes('fetch') || 
         (typeof navigator !== 'undefined' && !navigator.onLine)) {
       console.error(`Network error during operation: ${operationKey}`);
-      throw new Error(`Network error: ${error.message || 'Failed to connect to server'}`);
+      // Throw a more specific error that can be handled by the UI
+      const networkError = new Error(`Network error: ${error.message || 'Failed to connect to server'}`);
+      networkError.name = 'NetworkError';
+      throw networkError;
     }
 
     // Log the error with context

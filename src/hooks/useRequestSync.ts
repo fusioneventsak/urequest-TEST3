@@ -3,10 +3,26 @@ import { supabase } from '../utils/supabase';
 import { cacheService } from '../utils/cache';
 import { enhancedRealtimeManager } from '../utils/realtimeManager';
 import type { SongRequest } from '../types';
+import { backOff } from 'exponential-backoff';
 
 const REQUESTS_CACHE_KEY = 'requests:all';
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY = 1000; // Base delay in milliseconds
+
+// Configure retry options
+const RETRY_OPTIONS = {
+  numOfAttempts: MAX_RETRY_ATTEMPTS,
+  startingDelay: RETRY_DELAY,
+  timeMultiple: 2,
+  maxDelay: 5000,
+  retry: (error: any) => {
+    // Only retry on network errors
+    return error instanceof TypeError && 
+           (error.message.includes('Failed to fetch') || 
+            error.message.includes('NetworkError') ||
+            error.message.includes('network'));
+  }
+};
 
 export function useRequestSync() {
   const [requests, setRequests] = useState<SongRequest[]>([]);
@@ -14,10 +30,18 @@ export function useRequestSync() {
   const [error, setError] = useState<Error | null>(null);
   const retryCountRef = useRef(0);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchRequests = useCallback(async (bypassCache = false, retryAttempt = 0) => {
     setIsLoading(true);
     setError(null);
+    
+    // Create a fresh abort controller for this request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort('New request started');
+    }
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
     
     try {
       if (!bypassCache && retryAttempt === 0) {
@@ -29,19 +53,24 @@ export function useRequestSync() {
         }
       }
 
-      const { data, error: fetchError } = await supabase
-        .from('requests')
-        .select(`
-          *,
-          requesters (
-            id,
-            name,
-            photo,
-            message,
-            created_at
-          )
-        `)
-        .order('created_at', { ascending: false });
+      // Use exponential backoff for the fetch operation
+      const { data, error: fetchError } = await backOff(() => 
+        supabase
+          .from('requests')
+          .select(`
+            *,
+            requesters (
+              id,
+              name,
+              photo,
+              message,
+              created_at
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .abortSignal(signal),
+        RETRY_OPTIONS
+      );
 
       if (fetchError) throw fetchError;
 
@@ -66,6 +95,11 @@ export function useRequestSync() {
       cacheService.setRequests(REQUESTS_CACHE_KEY, formattedRequests);
       setRequests(formattedRequests);
       retryCountRef.current = 0; // Reset retry count on success
+      
+      // Clear any pending retry timeout
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+      }
     } catch (err) {
       console.error(`Error fetching requests (attempt ${retryAttempt + 1}):`, err);
       
@@ -87,6 +121,13 @@ export function useRequestSync() {
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsLoading(false);
+      
+      // Clean up abort controller
+      setTimeout(() => {
+        if (abortControllerRef.current && abortControllerRef.current.signal === signal) {
+          abortControllerRef.current = null;
+        }
+      }, 0);
     }
   }, []);
 
@@ -107,6 +148,10 @@ export function useRequestSync() {
       if (fetchTimeoutRef.current) {
         clearTimeout(fetchTimeoutRef.current);
       }
+      // Abort any in-flight requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort('Component unmounted');
+      }
       
       enhancedRealtimeManager.removeSubscription(subscription);
       enhancedRealtimeManager.removeSubscription(requestersSubscription);
@@ -117,6 +162,10 @@ export function useRequestSync() {
     // Clear any pending retry timeout
     if (fetchTimeoutRef.current) {
       clearTimeout(fetchTimeoutRef.current);
+    }
+    // Abort any in-flight requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort('Manual refresh');
     }
     retryCountRef.current = 0;
     fetchRequests(true);
