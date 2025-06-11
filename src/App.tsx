@@ -1,6 +1,6 @@
 // src/App.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { supabase } from './utils/supabase';
+import { supabase, executeDbOperation } from './utils/supabase';
 import { UserFrontend } from './components/UserFrontend';
 import { BackendLogin } from './components/BackendLogin';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
@@ -170,9 +170,9 @@ function App() {
       }
       
       // Show toast for network errors
-      if (errorMessage.includes('Failed to fetch') || 
+      if (!errorMessage.includes('aborted') && (errorMessage.includes('Failed to fetch') || 
           errorMessage.includes('NetworkError') || 
-          errorMessage.includes('network')) {
+          errorMessage.includes('network'))) {
         toast.error('Network connection issue. Please check your internet connection.');
         event.preventDefault();
         return;
@@ -1236,5 +1236,3 @@ function App() {
 }
 
 export default App;
-
-export default App
