@@ -1,225 +1,853 @@
-import React, { useState } from 'react';
-import { X, Music4, AlertTriangle } from 'lucide-react';
-import type { Song, User } from '../types';
-import { resizeAndCompressImage } from '../utils/imageUtils';
+// src/App.tsx
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { supabase } from './utils/supabase';
+import { UserFrontend } from './components/UserFrontend';
+import { BackendLogin } from './components/BackendLogin';
+import { ErrorBoundary } from './components/shared/ErrorBoundary';
+import { LoadingSpinner } from './components/shared/LoadingSpinner';
+import { ConnectionStatus } from './components/ConnectionStatus';
+import { useUiSettings } from './hooks/useUiSettings';
+import { useSongSync } from './hooks/useSongSync';
+import { useRequestSync } from './hooks/useRequestSync';
+import { useSetListSync } from './hooks/useSetListSync';
+import { v4 as uuidv4 } from 'uuid';
+import toast from 'react-hot-toast';
+import type { Song, SongRequest, RequestFormData, SetList, User } from './types';
+import { LogOut } from 'lucide-react';
 
-interface RequestModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  song: Song;
-  onSubmit: (data: any) => Promise<boolean>;
-  currentUser: User;
-}
+// Import the backend components
+import { SongLibrary } from './components/SongLibrary';
+import { SetListManager } from './components/SetListManager';
+import { QueueView } from './components/QueueView';
+import { SettingsManager } from './components/SettingsManager';
+import { LogoManager } from './components/LogoManager';
+import { ColorCustomizer } from './components/ColorCustomizer';
+import { LogoDebugger } from './components/LogoDebugger';
+import { TickerManager } from './components/TickerManager';
+import { BackendTabs } from './components/BackendTabs';
+import { LandingPage } from './components/LandingPage';
+import { Logo } from './components/shared/Logo';
+import { KioskPage } from './components/KioskPage';
 
-export function RequestModal({
-  isOpen,
-  onClose,
-  song,
-  onSubmit,
-  currentUser
-}: RequestModalProps) {
-  const [message, setMessage] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+const DEFAULT_BAND_LOGO = "https://www.fusion-events.ca/wp-content/uploads/2025/03/ulr-wordmark.png";
+const BACKEND_PATH = "backend";
+const KIOSK_PATH = "kiosk";
+const MAX_PHOTO_SIZE = 250 * 1024; // 250KB limit for database storage
+const MAX_REQUEST_RETRIES = 3;
 
-  if (!isOpen) return null;
+function App() {
+  // Authentication state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isBackend, setIsBackend] = useState(false);
+  const [isKiosk, setIsKiosk] = useState(false);
+  
+  // Backend tab state
+  const [activeBackendTab, setActiveBackendTab] = useState<'requests' | 'setlists' | 'songs' | 'settings'>('requests');
+  
+  // App data state
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [requests, setRequests] = useState<SongRequest[]>([]);
+  const [setLists, setSetLists] = useState<SetList[]>([]);
+  const [activeSetList, setActiveSetList] = useState<SetList | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [tickerMessage, setTickerMessage] = useState<string>('');
+  const [isTickerActive, setIsTickerActive] = useState(false);
+  
+  // Track network state
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isAppActive, setIsAppActive] = useState(true);
+  
+  // Ref to track if component is mounted
+  const mountedRef = useRef(true);
+  const requestInProgressRef = useRef(false);
+  const requestRetriesRef = useRef(0);
+  
+  // UI Settings
+  const { settings, updateSettings } = useUiSettings();
+  
+  // Initialize data synchronization
+  const { isLoading: isFetchingSongs } = useSongSync(setSongs);
+  const { isLoading: isFetchingRequests, reconnect: reconnectRequests } = useRequestSync(setRequests);
+  const { isLoading: isFetchingSetLists, refetch: refreshSetLists } = useSetListSync(setSetLists);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setError(null);
+  // Enhanced photo compression function with aggressive compression for database storage
+  const compressPhoto = useCallback((file: File, maxSizeKB: number = 200): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
 
-    try {
-      // Validate user data
-      if (!currentUser.name) {
-        throw new Error('User name is required');
-      }
-      
-      // Ensure message is properly trimmed and truncated
-      const truncatedMessage = message.trim().slice(0, 100);
-      
-      // Create a small thumbnail of the user photo for the request
-      let userPhotoThumbnail = '';
-      if (currentUser.photo && currentUser.photo.startsWith('data:')) {
+      img.onload = () => {
         try {
-          // Create a very small thumbnail (40x40px) with high compression for minimal payload
-          userPhotoThumbnail = await resizeAndCompressImage(
-            currentUser.photo,
-            40, // Small width for thumbnail
-            40, // Small height for thumbnail  
-            0.6 // Lower quality for smaller size
-          );
-        } catch (photoError) {
-          console.warn('Failed to compress user photo for request:', photoError);
-          // Continue without photo if compression fails
+          // More aggressive size limits for database storage
+          const maxWidth = 400;  // Reduced from 800
+          const maxHeight = 400; // Reduced from 800
+          let { width, height } = img;
+
+          // Calculate new dimensions maintaining aspect ratio
+          if (width > height) {
+            if (width > maxWidth) {
+              height = (height * maxWidth) / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = (width * maxHeight) / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          // Draw with better quality settings
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, width, height);
+          }
+
+          // Start with lower quality and be more aggressive
+          let quality = 0.7; // Start lower
+          let result: string;
+
+          do {
+            result = canvas.toDataURL('image/jpeg', quality);
+            const sizeKB = (result.length * 3) / 4 / 1024;
+            
+            console.log(`Compression attempt: ${Math.round(sizeKB)}KB at quality ${quality.toFixed(2)}`);
+            
+            if (sizeKB <= maxSizeKB || quality <= 0.05) {
+              break;
+            }
+            
+            quality -= 0.05; // Smaller steps for more precision
+          } while (quality > 0.05);
+
+          const finalSizeKB = (result.length * 3) / 4 / 1024;
+          console.log(`Final compressed size: ${Math.round(finalSizeKB)}KB`);
+
+          // If still too large, try WebP format (better compression)
+          if (finalSizeKB > maxSizeKB) {
+            quality = 0.6;
+            do {
+              result = canvas.toDataURL('image/webp', quality);
+              const sizeKB = (result.length * 3) / 4 / 1024;
+              
+              if (sizeKB <= maxSizeKB || quality <= 0.1) {
+                break;
+              }
+              
+              quality -= 0.1;
+            } while (quality > 0.1);
+          }
+
+          resolve(result);
+        } catch (error) {
+          reject(new Error('Failed to compress image'));
         }
-      } else if (currentUser.photo) {
-        // If it's already a URL (not base64), use it as-is
-        userPhotoThumbnail = currentUser.photo;
-      }
-      
-      const requestData = {
-        title: song.title,
-        artist: song.artist || '',
-        requestedBy: currentUser.name,
-        userPhoto: userPhotoThumbnail, // Small compressed thumbnail
-        message: truncatedMessage,
-        userId: currentUser.id || currentUser.name
       };
 
-      console.log("Submitting request with data:", requestData);
-      
-      const success = await onSubmit(requestData);
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  }, []);
 
-      if (success) {
-        setMessage('');
-        onClose();
-      } else {
-        throw new Error('Failed to submit request. Please try again.');
+  // Global error handler for unhandled promise rejections
+  useEffect(() => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('Unhandled Promise Rejection:', event.reason);
+      
+      // Don't show errors for aborted requests or unmounted components
+      const errorMessage = event.reason?.message || String(event.reason);
+      if (errorMessage.includes('aborted') || 
+          errorMessage.includes('Component unmounted') ||
+          errorMessage.includes('channel closed')) {
+        // Silently handle these errors
+        event.preventDefault();
+        return;
       }
+      
+      // Show toast for network errors
+      if (errorMessage.includes('Failed to fetch') || 
+          errorMessage.includes('NetworkError') || 
+          errorMessage.includes('network')) {
+        toast.error('Network connection issue. Please check your internet connection.');
+        event.preventDefault();
+        return;
+      }
+      
+      // Show generic error for other unhandled errors
+      toast.error('An error occurred. Please try again later.');
+      event.preventDefault();
+    };
+
+    // Listen for unhandled promise rejections
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    
+    return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
+  // Handle online/offline status
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('🌐 Network connection restored');
+      setIsOnline(true);
+      
+      // Attempt to reconnect and refresh data
+      reconnectRequests();
+      refreshSetLists();
+      
+      toast.success('Network connection restored');
+    };
+
+    const handleOffline = () => {
+      console.log('🌐 Network connection lost');
+      setIsOnline(false);
+      toast.error('Network connection lost. You can still view cached content.');
+    };
+
+    // Handle page visibility changes
+    const handleVisibilityChange = () => {
+      const isVisible = document.visibilityState === 'visible';
+      setIsAppActive(isVisible);
+      
+      if (isVisible) {
+        console.log('📱 App is now active. Refreshing data...');
+        // Refresh data when app becomes visible again
+        reconnectRequests();
+        refreshSetLists();
+      } else {
+        console.log('📱 App is now inactive');
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [reconnectRequests, refreshSetLists]);
+
+  // Track component mounted state
+  useEffect(() => {
+    mountedRef.current = true;
+    
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Check if we should show the backend or kiosk view
+  useEffect(() => {
+    const checkPathSpecialCases = () => {
+      const path = window.location.pathname.toLowerCase();
+      const isBackendPath = path === `/${BACKEND_PATH}` || path.startsWith(`/${BACKEND_PATH}/`);
+      const isKioskPath = path === `/${KIOSK_PATH}` || path.startsWith(`/${KIOSK_PATH}/`);
+      setIsBackend(isBackendPath);
+      setIsKiosk(isKioskPath);
+    };
+
+    checkPathSpecialCases();
+    window.addEventListener('popstate', checkPathSpecialCases);
+
+    return () => {
+      window.removeEventListener('popstate', checkPathSpecialCases);
+    };
+  }, []);
+
+  // Check auth state
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        // Check for backend auth in localStorage first
+        const hasAuth = localStorage.getItem('backendAuth') === 'true';
+        setIsAdmin(hasAuth);
+        
+        // Check for stored user
+        const savedUser = localStorage.getItem('currentUser');
+        if (savedUser) {
+          try {
+            setCurrentUser(JSON.parse(savedUser));
+          } catch (e) {
+            console.error('Error parsing saved user:', e);
+            localStorage.removeItem('currentUser');
+          }
+        }
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  // Update active set list when set lists change
+  useEffect(() => {
+    const active = setLists.find(sl => sl.isActive);
+    setActiveSetList(active || null);
+  }, [setLists]);
+
+  // Handle navigation to backend
+  const navigateToBackend = useCallback(() => {
+    window.history.pushState({}, '', `/${BACKEND_PATH}`);
+    setIsBackend(true);
+    setIsKiosk(false);
+  }, []);
+  
+  // Handle navigation to frontend
+  const navigateToFrontend = useCallback(() => {
+    window.history.pushState({}, '', '/');
+    setIsBackend(false);
+    setIsKiosk(false);
+  }, []);
+
+  // Handle navigation to kiosk mode
+  const navigateToKiosk = useCallback(() => {
+    window.history.pushState({}, '', `/${KIOSK_PATH}`);
+    setIsBackend(false);
+    setIsKiosk(true);
+  }, []);
+
+  // Handle admin login
+  const handleAdminLogin = useCallback(() => {
+    localStorage.setItem('backendAuth', 'true');
+    setIsAdmin(true);
+  }, []);
+
+  // Handle admin logout
+  const handleAdminLogout = useCallback(() => {
+    localStorage.removeItem('backendAuth');
+    localStorage.removeItem('backendUser');
+    setIsAdmin(false);
+    navigateToFrontend();
+    toast.success('Logged out successfully');
+  }, [navigateToFrontend]);
+  
+  // Handle user update with enhanced photo support
+  const handleUserUpdate = useCallback(async (user: User, photoFile?: File) => {
+    try {
+      let finalUser = { ...user };
+
+      // Handle photo upload if provided
+      if (photoFile) {
+        try {
+          // Validate file type
+          const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+          if (!allowedTypes.includes(photoFile.type)) {
+            throw new Error('Please select a JPEG, PNG, or WebP image file');
+          }
+
+          // Check file size (10MB limit before compression)
+          if (photoFile.size > 10 * 1024 * 1024) {
+            throw new Error('Image file is too large. Please select an image smaller than 10MB');
+          }
+
+          // Compress the photo to 200KB limit for database storage
+          const compressedPhoto = await compressPhoto(photoFile, 200);
+          finalUser.photo = compressedPhoto;
+
+          toast.success('📱 Photo uploaded and optimized for database storage!');
+        } catch (photoError) {
+          console.error('Photo processing error:', photoError);
+          toast.error(photoError instanceof Error ? photoError.message : 'Failed to process photo');
+          return;
+        }
+      }
+
+      // Validate final user data
+      if (!finalUser.name.trim()) {
+        toast.error('Please enter your name');
+        return;
+      }
+
+      // Enhanced photo size validation for database storage
+      if (finalUser.photo && finalUser.photo.startsWith('data:')) {
+        const base64Length = finalUser.photo.length - (finalUser.photo.indexOf(',') + 1);
+        const sizeKB = (base64Length * 3) / 4 / 1024;
+        
+        // 250KB limit for database storage
+        if (sizeKB > 250) {
+          toast.error(`Profile photo is too large (${Math.round(sizeKB)}KB). Maximum size is 250KB for database storage.`);
+          return;
+        }
+      }
+
+      // Update user state and save to localStorage
+      setCurrentUser(finalUser);
+      
+      try {
+        localStorage.setItem('currentUser', JSON.stringify(finalUser));
+      } catch (e) {
+        console.error('Error saving user to localStorage:', e);
+        // Still proceed even if localStorage fails
+        toast.warning('Profile updated but could not be saved locally');
+      }
+      
+      toast.success('Profile updated successfully!');
     } catch (error) {
-      console.error('Error in request modal:', error);
+      console.error('Error updating user:', error);
+      toast.error('Failed to update profile. Please try again.');
+    }
+  }, [compressPhoto]);
+
+  // Handle logo click
+  const onLogoClick = useCallback(() => {
+    // Empty function to handle logo clicks
+  }, []);
+
+  // Generate default avatar
+  const generateDefaultAvatar = (name: string): string => {
+    // Generate a simple SVG with the user's initials
+    const initials = name.split(' ')
+      .map(part => part.charAt(0).toUpperCase())
+      .slice(0, 2)
+      .join('');
+    
+    // Random pastel background color
+    const hue = Math.floor(Math.random() * 360);
+    const bgColor = `hsl(${hue}, 70%, 80%)`;
+    const textColor = '#333';
       
-      let errorMessage = 'Failed to submit request. Please try again.';
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="200" height="200">
+        <rect width="100" height="100" fill="${bgColor}" />
+        <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
+              fill="${textColor}" text-anchor="middle" dominant-baseline="central">${initials}</text>
+      </svg>
+    `;
+    
+    return `data:image/svg+xml;base64,${btoa(svg)}`;
+  };
+
+  // Handle song request submission with retry logic and enhanced photo support
+  const handleSubmitRequest = useCallback(async (data: RequestFormData): Promise<boolean> => {
+    if (requestInProgressRef.current) {
+      console.log('Request already in progress, please wait...');
+      toast.error('A request is already being processed. Please wait a moment and try again.');
+      return false;
+    }
+    
+    requestInProgressRef.current = true;
+    
+    try {
+      console.log('Submitting request:', data);
       
-      if (error instanceof Error) {
-        // Check for specific error types
-        if (error.message.includes('rate limit')) {
-          errorMessage = 'Too many requests. Please try again later.';
-        } else if (error.message.includes('duplicate')) {
-          errorMessage = 'This song has already been requested.';
-        } else if (error.message.includes('User name is required')) {
-          errorMessage = 'Please provide your name before submitting a request.';
-        } else if (error.message.includes('photo')) {
-          errorMessage = 'There was an issue with your profile photo. The request was submitted without it.';
-        } else if (error.message.includes('already requested')) {
-          errorMessage = error.message;
-        } else if (error.message.includes('Missing required fields')) {
-          errorMessage = 'Please ensure all required information is provided.';
+      // Enhanced photo size validation for database storage
+      if (data.userPhoto && data.userPhoto.startsWith('data:')) {
+        const base64Length = data.userPhoto.length - (data.userPhoto.indexOf(',') + 1);
+        const sizeKB = (base64Length * 3) / 4 / 1024;
+        
+        // 250KB limit for database storage
+        if (sizeKB > 250) {
+          throw new Error(`Your profile photo is too large (${Math.round(sizeKB)}KB). Please go back and update your profile with a smaller image (max 250KB).`);
+        }
+      }
+
+      // First check if the song is already requested - use maybeSingle() instead of single()
+      const { data: existingRequest, error: checkError } = await supabase
+        .from('requests')
+        .select('id, title')
+        .eq('title', data.title)
+        .eq('is_played', false)
+        .maybeSingle();
+
+      if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
+        throw checkError;
+      }
+
+      let requestId: string;
+
+      if (existingRequest) {
+        // For kiosk mode, we always add a new requester even if song is already requested
+        requestId = existingRequest.id;
+        
+        // Add requester to existing request
+        const { error: requesterError } = await supabase
+          .from('requesters')
+          .insert({
+            request_id: requestId,
+            name: data.requestedBy,
+            photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
+            message: data.message?.trim().slice(0, 100) || '',
+            created_at: new Date().toISOString()
+          });
+
+        if (requesterError) throw requesterError;
+      } else {
+        // Create new request
+        const { data: newRequest, error: requestError } = await supabase
+          .from('requests')
+          .insert({
+            title: data.title,
+            artist: data.artist || '',
+            votes: 0,
+            status: 'pending',
+            is_locked: false,
+            is_played: false,
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (requestError) throw requestError;
+        if (!newRequest) throw new Error('Failed to create request');
+
+        requestId = newRequest.id;
+
+        // Add requester to the new request
+        const { error: requesterError } = await supabase
+          .from('requesters')
+          .insert({
+            request_id: requestId,
+            name: data.requestedBy,
+            photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
+            message: data.message?.trim().slice(0, 100) || '',
+            created_at: new Date().toISOString()
+          });
+
+        if (requesterError) throw requesterError;
+      }
+
+      // Reset retry count on success
+      requestRetriesRef.current = 0;
+      
+      toast.success('Your request has been added to the queue!');
+      return true;
+    } catch (error) {
+      console.error('Error submitting request:', error);
+      
+      // If we get channel closed errors, attempt to reconnect
+      if (error instanceof Error && 
+          (error.message.includes('channel') || 
+           error.message.includes('Failed to fetch') || 
+           error.message.includes('NetworkError'))) {
+        
+        reconnectRequests();
+        
+        // Try to retry the request automatically
+        if (requestRetriesRef.current < MAX_REQUEST_RETRIES) {
+          requestRetriesRef.current++;
+          
+          const delay = Math.pow(2, requestRetriesRef.current) * 1000; // Exponential backoff
+          console.log(`Automatically retrying request in ${delay/1000} seconds (attempt ${requestRetriesRef.current}/${MAX_REQUEST_RETRIES})...`);
+          
+          setTimeout(() => {
+            if (mountedRef.current) {
+              requestInProgressRef.current = false;
+              handleSubmitRequest(data).catch(console.error);
+            }
+          }, delay);
+          
+          return false;
         }
       }
       
-      setError(errorMessage);
+      if (error instanceof Error) {
+        const errorMsg = error.message.includes('rate limit') 
+          ? 'Too many requests. Please try again later.'
+          : error.message || 'Failed to submit request. Please try again.';
+        toast.error(errorMsg);
+      } else {
+        toast.error('Failed to submit request. Please try again.');
+      }
+      
+      // Reset retry count on giving up
+      requestRetriesRef.current = 0;
+      
+      return false;
     } finally {
-      setIsSubmitting(false);
+      requestInProgressRef.current = false;
     }
-  };
+  }, [reconnectRequests, generateDefaultAvatar]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative glass-effect rounded-lg p-6 w-full max-w-lg">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white"
-        >
-          <X className="w-6 h-6" />
-        </button>
+  // Handle request vote with error handling
+  const handleVoteRequest = useCallback(async (id: string): Promise<boolean> => {
+    if (!isOnline) {
+      toast.error('Cannot vote while offline. Please check your internet connection.');
+      return false;
+    }
+    
+    try {
+      if (!currentUser || !currentUser.id) {
+        throw new Error('You must be logged in to vote');
+      }
 
-        <h2 className="text-xl font-bold text-white mb-6">Request Song</h2>
+      // Check if user already voted
+      const { data: existingVote, error: checkError } = await supabase
+        .from('user_votes')
+        .select('id')
+        .eq('request_id', id)
+        .eq('user_id', currentUser.id || currentUser.name)
+        .maybeSingle();
 
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-md p-3 mb-6 flex items-start">
-            <AlertTriangle className="w-5 h-5 text-red-400 mr-2 flex-shrink-0 mt-0.5" />
-            <p className="text-red-400 text-sm">{error}</p>
-          </div>
-        )}
+      if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
+        throw checkError;
+      }
 
-        <div className="flex items-start space-x-4 mb-6">
-          {song.albumArtUrl ? (
-            <img 
-              src={song.albumArtUrl} 
-              alt={`${song.title} album art`}
-              className="w-16 h-16 rounded-lg object-cover neon-border"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                const musicIcon = e.currentTarget.nextElementSibling as HTMLElement;
-                if (musicIcon) musicIcon.style.display = 'flex';
-              }}
-            />
-          ) : null}
-          <div 
-            className={`w-16 h-16 rounded-lg neon-border bg-neon-purple/20 flex items-center justify-center ${song.albumArtUrl ? 'hidden' : 'flex'}`}
-          >
-            <Music4 className="w-8 h-8 text-neon-purple" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-white truncate">{song.title}</h3>
-            {song.artist && (
-              <p className="text-gray-300 text-sm truncate">{song.artist}</p>
-            )}
-            {song.genre && (
-              <p className="text-gray-400 text-xs">{song.genre}</p>
-            )}
-          </div>
-        </div>
+      if (existingVote) {
+        toast.error('You have already voted for this request');
+        return false;
+      }
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="flex items-center space-x-3 p-3 rounded-lg bg-neon-purple/10 border border-neon-purple/20">
-            <img 
-              src={currentUser.photo} 
-              alt={currentUser.name}
-              className="w-10 h-10 rounded-full object-cover border-2 border-neon-purple/50"
-              onError={(e) => {
-                // Fallback to default avatar on error
-                e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
-              }}
-            />
-            <div className="flex-1">
-              <p className="text-white font-medium">{currentUser.name}</p>
-              <p className="text-gray-400 text-sm">Requesting as</p>
-            </div>
-          </div>
+      // Get current votes
+      const { data, error: getError } = await supabase
+        .from('requests')
+        .select('votes')
+        .eq('id', id)
+        .single();
+        
+      if (getError) throw getError;
+      
+      // Update votes count
+      const currentVotes = data?.votes || 0;
+      const { error: updateError } = await supabase
+        .from('requests')
+        .update({ votes: currentVotes + 1 })
+        .eq('id', id);
+        
+      if (updateError) throw updateError;
+      
+      // Record vote to prevent duplicates
+      const { error: voteError } = await supabase
+        .from('user_votes')
+        .insert({
+          request_id: id,
+          user_id: currentUser.id || currentUser.name,
+          created_at: new Date().toISOString()
+        });
+        
+      if (voteError) throw voteError;
+        
+      toast.success('Vote added!');
+      return true;
+    } catch (error) {
+      console.error('Error voting for request:', error);
+      
+      if (error instanceof Error && error.message.includes('already voted')) {
+        toast.error(error.message);
+      } else if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to vote for this request. Please try again.');
+      }
+      
+      return false;
+    }
+  }, [currentUser, isOnline]);
 
-          <div>
-            <label className="block text-sm font-medium text-white mb-2">
-              Add a message (optional)
-            </label>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Any special notes for this request..."
-              className="w-full px-3 py-2 bg-darker-purple/50 border border-neon-purple/30 rounded-md text-white placeholder-gray-400 focus:outline-none focus:border-neon-purple resize-none"
-              rows={3}
-              maxLength={100}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              {message.length}/100 characters
-            </p>
-          </div>
+  // Handle locking a request (marking it as next)
+  const handleLockRequest = useCallback(async (id: string) => {
+    if (!isOnline) {
+      toast.error('Cannot update requests while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      const requestToUpdate = requests.find(r => r.id === id);
+      if (!requestToUpdate) return;
+      
+      // Toggle the locked status
+      const newLockedState = !requestToUpdate.isLocked;
+      
+      // If locking, unlock all others first
+      if (newLockedState) {
+        const { error: unlockError } = await supabase
+          .from('requests')
+          .update({ is_locked: false })
+          .neq('id', id);
+          
+        if (unlockError) throw unlockError;
+      }
+      
+      // Update this request's lock status
+      const { error } = await supabase
+        .from('requests')
+        .update({ is_locked: newLockedState })
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      toast.success(newLockedState ? 'Request locked as next song' : 'Request unlocked');
+    } catch (error) {
+      console.error('Error toggling request lock:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update request. Please try again.');
+      }
+    }
+  }, [requests, isOnline]);
 
-          <div className="flex space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 text-gray-300 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 neon-button disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? (
-                <span className="flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Submitting...
-                </span>
-              ) : (
-                'Submit Request'
-              )}
-            </button>
-          </div>
-        </form>
+  // Handle marking a request as played
+  const handleMarkPlayed = useCallback(async (id: string) => {
+    if (!isOnline) {
+      toast.error('Cannot update requests while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      // Update the request as played
+      const { error } = await supabase
+        .from('requests')
+        .update({ 
+          is_played: true,
+          is_locked: false
+        })
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      toast.success('Request marked as played');
+    } catch (error) {
+      console.error('Error marking request as played:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update request. Please try again.');
+      }
+    }
+  }, [isOnline]);
 
-        {/* Updated notice to reflect thumbnail usage */}
-        <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-md">
-          <p className="text-blue-300 text-xs">
-            📱 Your profile photo will be included as a small thumbnail with your request for easy identification in the queue.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
+  // Handle resetting the request queue
+  const handleResetQueue = useCallback(async () => {
+    if (!isOnline) {
+      toast.error('Cannot reset queue while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      // Count requests to be cleared
+      const pendingRequests = requests.filter(r => !r.isPlayed).length;
+      
+      // Reset all pending requests
+      const { error } = await supabase
+        .from('requests')
+        .update({ 
+          is_played: true,
+          is_locked: false,
+          votes: 0
+        })
+        .eq('is_played', false);
+        
+      if (error) throw error;
+      
+      // Log the reset
+      const { error: logError } = await supabase
+        .from('queue_reset_logs')
+        .insert({
+          set_list_id: activeSetList?.id,
+          reset_type: 'manual',
+          requests_cleared: pendingRequests
+        });
+        
+      if (logError) console.error('Error logging queue reset:', logError);
+
+      // Clear rate limits with proper WHERE clause
+      const { error: votesError } = await supabase
+        .from('user_votes')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+        
+      if (votesError) console.error('Error clearing vote limits:', votesError);
+      
+      toast.success('Request queue cleared and rate limits reset');
+    } catch (error) {
+      console.error('Error resetting queue:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to clear queue. Please try again.');
+      }
+    }
+  }, [requests, activeSetList, isOnline]);
+
+  // Handle adding a new song
+  const handleAddSong = useCallback((song: Omit<Song, 'id'>) => {
+    setSongs(prev => [...prev, { ...song, id: uuidv4() }]);
+  }, []);
+
+  // Handle updating a song
+  const handleUpdateSong = useCallback((updatedSong: Song) => {
+    setSongs(prev => prev.map(song => 
+      song.id === updatedSong.id ? updatedSong : song
+    ));
+  }, []);
+
+  // Handle deleting a song
+  const handleDeleteSong = useCallback((id: string) => {
+    setSongs(prev => prev.filter(song => song.id !== id));
+  }, []);
+
+  // Handle creating a new set list
+  const handleCreateSetList = useCallback(async (newSetList: Omit<SetList, 'id'>) => {
+    if (!isOnline) {
+      toast.error('Cannot create set list while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      // Extract songs from the set list to handle separately
+      const { songs, ...setListData } = newSetList;
+      
+      // Convert camelCase to snake_case for database
+      const dbSetListData = {
+        name: setListData.name,
+        date: setListData.date,
+        notes: setListData.notes,
+        is_active: setListData.isActive || false
+      };
+      
+      // Insert the set list
+      const { data, error } = await supabase
+        .from('set_lists')
+        .insert(dbSetListData)
+        .select();
+        
+      if (error) throw error;
+      
+      if (data && songs && songs.length > 0) {
+        // Insert songs with positions
+        const songMappings = songs.map((song, index) => ({
+          set_list_id: data[0].id,
+          song_id: song.id,
+          position: index
+        }));
+        
+        const { error: songError } = await supabase
+          .from('set_list_songs')
+          .insert(songMappings);
+          
+        if (songError) throw songError;
+      }
+      
+      toast.success('Set list created successfully');
+      refreshSetLists(); // Refresh to get latest data
+    } catch (error) {
+      console.error('Error creating
