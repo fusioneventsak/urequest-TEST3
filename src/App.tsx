@@ -429,32 +429,35 @@ function App() {
   }, [isOnline, refreshSetLists]);
 
   // Request queue management
-  const handleLockRequest = useCallback(async (requestId: string) => {
+  const handleLockRequest = useCallback(async (id: string) => {
     if (!isOnline) {
-      toast.error('Cannot lock request while offline. Please check your internet connection.');
+      toast.error('Cannot update requests while offline.');
       return;
     }
-
+    
     try {
-      // First unlock any currently locked request
-      await supabase
-        .from('requests')
-        .update({ is_locked: false })
-        .eq('is_locked', true);
-
-      // Lock the selected request
-      const { error } = await supabase
-        .from('requests')
-        .update({ is_locked: true })
-        .eq('id', requestId);
-
+      const startTime = Date.now();
+      
+      // Use the atomic lock function
+      const { error } = await supabase.rpc('lock_request', { request_id: id });
       if (error) throw error;
-
-      toast.success('Request locked as next');
-      refreshRequests();
+      
+      const lockTime = Date.now() - startTime;
+      console.log(`⚡ Lock operation completed in ${lockTime}ms`);
+      
+      toast.success('Request locked as next song');
     } catch (error) {
-      console.error('Error locking request:', error);
-      toast.error('Failed to lock request. Please try again.');
+      console.error('Error toggling request lock:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update request. Please try again.');
+      }
     }
   }, [isOnline, refreshRequests]);
 

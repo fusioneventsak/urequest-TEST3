@@ -36,785 +36,319 @@ const MAX_PHOTO_SIZE = 250 * 1024; // 250KB limit for database storage
 const MAX_REQUEST_RETRIES = 3;
 
 function App() {
-  // Authentication state
+  // State management
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [isBackend, setIsBackend] = useState(false);
-  const [isKiosk, setIsKiosk] = useState(false);
-  
-  // Backend tab state
-  const [activeBackendTab, setActiveBackendTab] = useState<'requests' | 'setlists' | 'songs' | 'settings'>('requests');
-  
-  // App data state
-  const [songs, setSongs] = useState<Song[]>([]);
-  const [requests, setRequests] = useState<SongRequest[]>([]);
-  const [setLists, setSetLists] = useState<SetList[]>([]);
-  const [activeSetList, setActiveSetList] = useState<SetList | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [tickerMessage, setTickerMessage] = useState<string>('');
-  const [isTickerActive, setIsTickerActive] = useState(false);
-  
-  // Track network state
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [isAppActive, setIsAppActive] = useState(true);
-  
-  // Ref to track if component is mounted
-  const mountedRef = useRef(true);
-  const requestInProgressRef = useRef(false);
-  const requestRetriesRef = useRef(0);
-  
-  // UI Settings
-  const { settings, updateSettings } = useUiSettings();
-  
-  // Initialize data synchronization
-  const { isLoading: isFetchingSongs } = useSongSync(setSongs);
-  const { isLoading: isFetchingRequests, reconnect: reconnectRequests } = useRequestSync(setRequests);
-  const { isLoading: isFetchingSetLists, refetch: refreshSetLists } = useSetListSync(setSetLists);
+  const [activeBackendTab, setActiveBackendTab] = useState('queue');
 
-  // Enhanced photo compression function with aggressive compression for database storage
-  const compressPhoto = useCallback((file: File, maxSizeKB: number = 200): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
+  // Custom hooks
+  const { settings, refreshSettings } = useUiSettings();
+  const { songs, setSongs, refreshSongs } = useSongSync();
+  const { requests, refreshRequests } = useRequestSync();
+  const { setLists, refreshSetLists } = useSetListSync();
 
-      img.onload = () => {
-        try {
-          // More aggressive size limits for database storage
-          const maxWidth = 400;  // Reduced from 800
-          const maxHeight = 400; // Reduced from 800
-          let { width, height } = img;
+  // URL state
+  const isBackend = window.location.pathname.includes(BACKEND_PATH);
+  const isKiosk = window.location.pathname.includes(KIOSK_PATH);
 
-          // Calculate new dimensions maintaining aspect ratio
-          if (width > height) {
-            if (width > maxWidth) {
-              height = (height * maxWidth) / width;
-              width = maxWidth;
-            }
-          } else {
-            if (height > maxHeight) {
-              width = (width * maxHeight) / height;
-              height = maxHeight;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-
-          // Draw with better quality settings
-          if (ctx) {
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(img, 0, 0, width, height);
-          }
-
-          // Start with lower quality and be more aggressive
-          let quality = 0.7; // Start lower
-          let result: string;
-
-          do {
-            result = canvas.toDataURL('image/jpeg', quality);
-            const sizeKB = (result.length * 3) / 4 / 1024;
-            
-            console.log(`Compression attempt: ${Math.round(sizeKB)}KB at quality ${quality.toFixed(2)}`);
-            
-            if (sizeKB <= maxSizeKB || quality <= 0.05) {
-              break;
-            }
-            
-            quality -= 0.05; // Smaller steps for more precision
-          } while (quality > 0.05);
-
-          const finalSizeKB = (result.length * 3) / 4 / 1024;
-          console.log(`Final compressed size: ${Math.round(finalSizeKB)}KB`);
-
-          // If still too large, try WebP format (better compression)
-          if (finalSizeKB > maxSizeKB) {
-            quality = 0.6;
-            do {
-              result = canvas.toDataURL('image/webp', quality);
-              const sizeKB = (result.length * 3) / 4 / 1024;
-              
-              if (sizeKB <= maxSizeKB || quality <= 0.1) {
-                break;
-              }
-              
-              quality -= 0.1;
-            } while (quality > 0.1);
-          }
-
-          resolve(result);
-        } catch (error) {
-          reject(new Error('Failed to compress image'));
-        }
-      };
-
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = URL.createObjectURL(file);
-    });
-  }, []);
-
-  // Global error handler for unhandled promise rejections
+  // Initialize app
   useEffect(() => {
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('Unhandled Promise Rejection:', event.reason);
-      
-      // Don't show errors for aborted requests or unmounted components
-      const errorMessage = event.reason?.message || String(event.reason);
-      if (errorMessage.includes('aborted') || 
-          errorMessage.includes('Component unmounted') ||
-          errorMessage.includes('channel closed')) {
-        // Silently handle these errors
-        event.preventDefault();
-        return;
-      }
-      
-      // Show toast for network errors
-      if (errorMessage.includes('Failed to fetch') || 
-          errorMessage.includes('NetworkError') || 
-          errorMessage.includes('network')) {
-        toast.error('Network connection issue. Please check your internet connection.');
-        event.preventDefault();
-        return;
-      }
-      
-      // Show generic error for other unhandled errors
-      toast.error('An error occurred. Please try again later.');
-      event.preventDefault();
-    };
-
-    // Listen for unhandled promise rejections
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    
-    return () => {
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
-  }, []);
-
-  // Handle online/offline status
-  useEffect(() => {
-    const handleOnline = () => {
-      console.log('🌐 Network connection restored');
-      setIsOnline(true);
-      
-      // Attempt to reconnect and refresh data
-      reconnectRequests();
-      refreshSetLists();
-      
-      toast.success('Network connection restored');
-    };
-
-    const handleOffline = () => {
-      console.log('🌐 Network connection lost');
-      setIsOnline(false);
-      toast.error('Network connection lost. You can still view cached content.');
-    };
-
-    // Handle page visibility changes
-    const handleVisibilityChange = () => {
-      const isVisible = document.visibilityState === 'visible';
-      setIsAppActive(isVisible);
-      
-      if (isVisible) {
-        console.log('📱 App is now active. Refreshing data...');
-        // Refresh data when app becomes visible again
-        reconnectRequests();
-        refreshSetLists();
-      } else {
-        console.log('📱 App is now inactive');
-      }
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [reconnectRequests, refreshSetLists]);
-
-  // Track component mounted state
-  useEffect(() => {
-    mountedRef.current = true;
-    
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // Check if we should show the backend or kiosk view
-  useEffect(() => {
-    const checkPathSpecialCases = () => {
-      const path = window.location.pathname.toLowerCase();
-      const isBackendPath = path === `/${BACKEND_PATH}` || path.startsWith(`/${BACKEND_PATH}/`);
-      const isKioskPath = path === `/${KIOSK_PATH}` || path.startsWith(`/${KIOSK_PATH}/`);
-      setIsBackend(isBackendPath);
-      setIsKiosk(isKioskPath);
-    };
-
-    checkPathSpecialCases();
-    window.addEventListener('popstate', checkPathSpecialCases);
-
-    return () => {
-      window.removeEventListener('popstate', checkPathSpecialCases);
-    };
-  }, []);
-
-  // Check auth state
-  useEffect(() => {
-    const checkAuth = async () => {
+    const initializeApp = async () => {
       try {
-        // Check for backend auth in localStorage first
-        const hasAuth = localStorage.getItem('backendAuth') === 'true';
-        setIsAdmin(hasAuth);
-        
-        // Check for stored user
+        // Load user from localStorage
         const savedUser = localStorage.getItem('currentUser');
         if (savedUser) {
-          try {
-            setCurrentUser(JSON.parse(savedUser));
-          } catch (e) {
-            console.error('Error parsing saved user:', e);
-            localStorage.removeItem('currentUser');
-          }
+          setCurrentUser(JSON.parse(savedUser));
         }
+
+        // Check admin status
+        const adminStatus = localStorage.getItem('isAdmin') === 'true';
+        setIsAdmin(adminStatus);
+
+        // Initialize data
+        await Promise.all([
+          refreshSettings(),
+          refreshSongs(),
+          refreshRequests(),
+          refreshSetLists()
+        ]);
+      } catch (error) {
+        console.error('Error initializing app:', error);
+        toast.error('Failed to initialize app');
       } finally {
         setIsInitializing(false);
       }
     };
 
-    checkAuth();
-  }, []);
+    initializeApp();
+  }, [refreshSettings, refreshSongs, refreshRequests, refreshSetLists]);
 
-  // Update active set list when set lists change
+  // Online/offline detection
   useEffect(() => {
-    const active = setLists.find(sl => sl.isActive);
-    setActiveSetList(active || null);
-  }, [setLists]);
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
 
-  // Handle navigation to backend
-  const navigateToBackend = useCallback(() => {
-    window.history.pushState({}, '', `/${BACKEND_PATH}`);
-    setIsBackend(true);
-    setIsKiosk(false);
-  }, []);
-  
-  // Handle navigation to frontend
-  const navigateToFrontend = useCallback(() => {
-    window.history.pushState({}, '', '/');
-    setIsBackend(false);
-    setIsKiosk(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
-  // Handle navigation to kiosk mode
-  const navigateToKiosk = useCallback(() => {
-    window.history.pushState({}, '', `/${KIOSK_PATH}`);
-    setIsBackend(false);
-    setIsKiosk(true);
+  // User management
+  const handleUserUpdate = useCallback((user: User) => {
+    setCurrentUser(user);
+    localStorage.setItem('currentUser', JSON.stringify(user));
   }, []);
 
-  // Handle admin login
-  const handleAdminLogin = useCallback(() => {
-    localStorage.setItem('backendAuth', 'true');
-    setIsAdmin(true);
-  }, []);
-
-  // Handle admin logout
-  const handleAdminLogout = useCallback(() => {
-    localStorage.removeItem('backendAuth');
-    localStorage.removeItem('backendUser');
-    setIsAdmin(false);
-    navigateToFrontend();
-    toast.success('Logged out successfully');
-  }, [navigateToFrontend]);
-  
-  // Handle user update with enhanced photo support
-  const handleUserUpdate = useCallback(async (user: User, photoFile?: File) => {
-    try {
-      let finalUser = { ...user };
-
-      // Handle photo upload if provided
-      if (photoFile) {
-        try {
-          // Validate file type
-          const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-          if (!allowedTypes.includes(photoFile.type)) {
-            throw new Error('Please select a JPEG, PNG, or WebP image file');
-          }
-
-          // Check file size (10MB limit before compression)
-          if (photoFile.size > 10 * 1024 * 1024) {
-            throw new Error('Image file is too large. Please select an image smaller than 10MB');
-          }
-
-          // Compress the photo to 200KB limit for database storage
-          const compressedPhoto = await compressPhoto(photoFile, 200);
-          finalUser.photo = compressedPhoto;
-
-          toast.success('📱 Photo uploaded and optimized for database storage!');
-        } catch (photoError) {
-          console.error('Photo processing error:', photoError);
-          toast.error(photoError instanceof Error ? photoError.message : 'Failed to process photo');
-          return;
-        }
-      }
-
-      // Validate final user data
-      if (!finalUser.name.trim()) {
-        toast.error('Please enter your name');
-        return;
-      }
-
-      // Enhanced photo size validation for database storage
-      if (finalUser.photo && finalUser.photo.startsWith('data:')) {
-        const base64Length = finalUser.photo.length - (finalUser.photo.indexOf(',') + 1);
-        const sizeKB = (base64Length * 3) / 4 / 1024;
-        
-        // 250KB limit for database storage
-        if (sizeKB > 250) {
-          toast.error(`Profile photo is too large (${Math.round(sizeKB)}KB). Maximum size is 250KB for database storage.`);
-          return;
-        }
-      }
-
-      // Update user state and save to localStorage
-      setCurrentUser(finalUser);
-      
-      try {
-        localStorage.setItem('currentUser', JSON.stringify(finalUser));
-      } catch (e) {
-        console.error('Error saving user to localStorage:', e);
-        // Still proceed even if localStorage fails
-        toast.warning('Profile updated but could not be saved locally');
-      }
-      
-      toast.success('Profile updated successfully!');
-    } catch (error) {
-      console.error('Error updating user:', error);
-      toast.error('Failed to update profile. Please try again.');
-    }
-  }, [compressPhoto]);
-
-  // Handle logo click
-  const onLogoClick = useCallback(() => {
-    // Empty function to handle logo clicks
-  }, []);
-
-  // Generate default avatar
-  const generateDefaultAvatar = (name: string): string => {
-    // Generate a simple SVG with the user's initials
-    const initials = name.split(' ')
-      .map(part => part.charAt(0).toUpperCase())
-      .slice(0, 2)
-      .join('');
-    
-    // Random pastel background color
-    const hue = Math.floor(Math.random() * 360);
-    const bgColor = `hsl(${hue}, 70%, 80%)`;
-    const textColor = '#333';
-      
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="200" height="200">
-        <rect width="100" height="100" fill="${bgColor}" />
-        <text x="50" y="50" font-family="Arial, sans-serif" font-size="40" font-weight="bold" 
-              fill="${textColor}" text-anchor="middle" dominant-baseline="central">${initials}</text>
-      </svg>
-    `;
-    
-    return `data:image/svg+xml;base64,${btoa(svg)}`;
-  };
-
-  // Handle song request submission with retry logic and enhanced photo support
-  const handleSubmitRequest = useCallback(async (data: RequestFormData): Promise<boolean> => {
-    if (requestInProgressRef.current) {
-      console.log('Request already in progress, please wait...');
-      toast.error('A request is already being processed. Please wait a moment and try again.');
-      return false;
-    }
-    
-    requestInProgressRef.current = true;
-    
-    try {
-      console.log('Submitting request:', data);
-      
-      // Enhanced photo size validation for database storage
-      if (data.userPhoto && data.userPhoto.startsWith('data:')) {
-        const base64Length = data.userPhoto.length - (data.userPhoto.indexOf(',') + 1);
-        const sizeKB = (base64Length * 3) / 4 / 1024;
-        
-        // 250KB limit for database storage
-        if (sizeKB > 250) {
-          throw new Error(`Your profile photo is too large (${Math.round(sizeKB)}KB). Please go back and update your profile with a smaller image (max 250KB).`);
-        }
-      }
-
-      // First check if the song is already requested - use maybeSingle() instead of single()
-      const { data: existingRequest, error: checkError } = await supabase
-        .from('requests')
-        .select('id, title')
-        .eq('title', data.title)
-        .eq('is_played', false)
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
-        throw checkError;
-      }
-
-      let requestId: string;
-
-      if (existingRequest) {
-        // For kiosk mode, we always add a new requester even if song is already requested
-        requestId = existingRequest.id;
-        
-        // Add requester to existing request
-        const { error: requesterError } = await supabase
-          .from('requesters')
-          .insert({
-            request_id: requestId,
-            name: data.requestedBy,
-            photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
-            message: data.message?.trim().slice(0, 100) || '',
-            created_at: new Date().toISOString()
-          });
-
-        if (requesterError) throw requesterError;
-      } else {
-        // Create new request
-        const { data: newRequest, error: requestError } = await supabase
-          .from('requests')
-          .insert({
-            title: data.title,
-            artist: data.artist || '',
-            votes: 0,
-            status: 'pending',
-            is_locked: false,
-            is_played: false,
-            created_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-
-        if (requestError) throw requestError;
-        if (!newRequest) throw new Error('Failed to create request');
-
-        requestId = newRequest.id;
-
-        // Add requester to the new request
-        const { error: requesterError } = await supabase
-          .from('requesters')
-          .insert({
-            request_id: requestId,
-            name: data.requestedBy,
-            photo: data.userPhoto || generateDefaultAvatar(data.requestedBy),
-            message: data.message?.trim().slice(0, 100) || '',
-            created_at: new Date().toISOString()
-          });
-
-        if (requesterError) throw requesterError;
-      }
-
-      // Reset retry count on success
-      requestRetriesRef.current = 0;
-      
-      toast.success('Your request has been added to the queue!');
+  // Admin authentication
+  const handleAdminLogin = useCallback((password: string) => {
+    // Simple password check - in production, use proper authentication
+    if (password === 'admin123') {
+      setIsAdmin(true);
+      localStorage.setItem('isAdmin', 'true');
+      toast.success('Admin login successful');
       return true;
-    } catch (error) {
-      console.error('Error submitting request:', error);
-      
-      // If we get channel closed errors, attempt to reconnect
-      if (error instanceof Error && 
-          (error.message.includes('channel') || 
-           error.message.includes('Failed to fetch') || 
-           error.message.includes('NetworkError'))) {
-        
-        reconnectRequests();
-        
-        // Try to retry the request automatically
-        if (requestRetriesRef.current < MAX_REQUEST_RETRIES) {
-          requestRetriesRef.current++;
-          
-          const delay = Math.pow(2, requestRetriesRef.current) * 1000; // Exponential backoff
-          console.log(`Automatically retrying request in ${delay/1000} seconds (attempt ${requestRetriesRef.current}/${MAX_REQUEST_RETRIES})...`);
-          
-          setTimeout(() => {
-            if (mountedRef.current) {
-              requestInProgressRef.current = false;
-              handleSubmitRequest(data).catch(console.error);
-            }
-          }, delay);
-          
-          return false;
-        }
-      }
-      
-      if (error instanceof Error) {
-        const errorMsg = error.message.includes('rate limit') 
-          ? 'Too many requests. Please try again later.'
-          : error.message || 'Failed to submit request. Please try again.';
-        toast.error(errorMsg);
-      } else {
-        toast.error('Failed to submit request. Please try again.');
-      }
-      
-      // Reset retry count on giving up
-      requestRetriesRef.current = 0;
-      
-      return false;
-    } finally {
-      requestInProgressRef.current = false;
     }
-  }, [reconnectRequests, generateDefaultAvatar]);
+    toast.error('Invalid password');
+    return false;
+  }, []);
 
-  // Handle request vote with error handling
-  const handleVoteRequest = useCallback(async (id: string): Promise<boolean> => {
+  const handleAdminLogout = useCallback(() => {
+    setIsAdmin(false);
+    localStorage.removeItem('isAdmin');
+    window.location.href = '/';
+  }, []);
+
+  // Request management
+  const handleSubmitRequest = useCallback(async (requestData: RequestFormData) => {
     if (!isOnline) {
-      toast.error('Cannot vote while offline. Please check your internet connection.');
-      return false;
+      toast.error('Cannot submit request while offline. Please check your internet connection.');
+      return;
     }
-    
+
+    if (!currentUser) {
+      toast.error('Please create a profile first');
+      return;
+    }
+
     try {
-      if (!currentUser || !currentUser.id) {
-        throw new Error('You must be logged in to vote');
-      }
-
-      // Check if user already voted
-      const { data: existingVote, error: checkError } = await supabase
-        .from('user_votes')
-        .select('id')
-        .eq('request_id', id)
-        .eq('user_id', currentUser.id || currentUser.name)
-        .maybeSingle();
-
-      if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
-        throw checkError;
-      }
-
-      if (existingVote) {
-        toast.error('You have already voted for this request');
-        return false;
-      }
-
-      // Get current votes
-      const { data, error: getError } = await supabase
+      // Create the request
+      const requestId = uuidv4();
+      const { error: requestError } = await supabase
         .from('requests')
-        .select('votes')
-        .eq('id', id)
-        .single();
-        
-      if (getError) throw getError;
-      
-      // Update votes count
-      const currentVotes = data?.votes || 0;
-      const { error: updateError } = await supabase
-        .from('requests')
-        .update({ votes: currentVotes + 1 })
-        .eq('id', id);
-        
-      if (updateError) throw updateError;
-      
-      // Record vote to prevent duplicates
+        .insert({
+          id: requestId,
+          title: requestData.title,
+          artist: requestData.artist || null,
+          votes: 1,
+          status: 'pending',
+          is_locked: false,
+          is_played: false
+        });
+
+      if (requestError) throw requestError;
+
+      // Add the requester
+      const { error: requesterError } = await supabase
+        .from('requesters')
+        .insert({
+          request_id: requestId,
+          name: currentUser.name,
+          photo: currentUser.photo,
+          message: requestData.message || null
+        });
+
+      if (requesterError) throw requesterError;
+
+      // Add user vote
       const { error: voteError } = await supabase
         .from('user_votes')
         .insert({
-          request_id: id,
-          user_id: currentUser.id || currentUser.name,
-          created_at: new Date().toISOString()
+          request_id: requestId,
+          user_id: currentUser.id || currentUser.name
         });
-        
+
       if (voteError) throw voteError;
-        
+
+      toast.success('Request submitted successfully!');
+      refreshRequests();
+    } catch (error) {
+      console.error('Error submitting request:', error);
+      toast.error('Failed to submit request. Please try again.');
+    }
+  }, [currentUser, isOnline, refreshRequests]);
+
+  const handleVoteRequest = useCallback(async (requestId: string) => {
+    if (!isOnline) {
+      toast.error('Cannot vote while offline. Please check your internet connection.');
+      return;
+    }
+
+    if (!currentUser) {
+      toast.error('Please create a profile first');
+      return;
+    }
+
+    try {
+      const userId = currentUser.id || currentUser.name;
+
+      // Check if user already voted
+      const { data: existingVote } = await supabase
+        .from('user_votes')
+        .select('id')
+        .eq('request_id', requestId)
+        .eq('user_id', userId)
+        .single();
+
+      if (existingVote) {
+        toast.error('You have already voted for this request');
+        return;
+      }
+
+      // Add vote
+      const { error: voteError } = await supabase
+        .from('user_votes')
+        .insert({
+          request_id: requestId,
+          user_id: userId
+        });
+
+      if (voteError) throw voteError;
+
+      // Update vote count
+      const { error: updateError } = await supabase
+        .rpc('increment_votes', { request_id: requestId });
+
+      if (updateError) throw updateError;
+
       toast.success('Vote added!');
-      return true;
+      refreshRequests();
     } catch (error) {
       console.error('Error voting for request:', error);
-      
-      if (error instanceof Error && error.message.includes('already voted')) {
-        toast.error(error.message);
-      } else if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to vote for this request. Please try again.');
-      }
-      
-      return false;
+      toast.error('Failed to vote. Please try again.');
     }
-  }, [currentUser, isOnline]);
+  }, [currentUser, isOnline, refreshRequests]);
 
-  // Handle locking a request (marking it as next)
-  const handleLockRequest = useCallback(async (id: string) => {
+  // Song management
+  const handleAddSong = useCallback(async (songData: Omit<Song, 'id'>) => {
     if (!isOnline) {
-      toast.error('Cannot update requests while offline. Please check your internet connection.');
+      toast.error('Cannot add song while offline. Please check your internet connection.');
       return;
     }
-    
-    try {
-      const requestToUpdate = requests.find(r => r.id === id);
-      if (!requestToUpdate) return;
-      
-      // Toggle the locked status
-      const newLockedState = !requestToUpdate.isLocked;
-      
-      // If locking, unlock all others first
-      if (newLockedState) {
-        const { error: unlockError } = await supabase
-          .from('requests')
-          .update({ is_locked: false })
-          .neq('id', id);
-          
-        if (unlockError) throw unlockError;
-      }
-      
-      // Update this request's lock status
-      const { error } = await supabase
-        .from('requests')
-        .update({ is_locked: newLockedState })
-        .eq('id', id);
-        
-      if (error) throw error;
-      
-      toast.success(newLockedState ? 'Request locked as next song' : 'Request unlocked');
-    } catch (error) {
-      console.error('Error toggling request lock:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to update request. Please try again.');
-      }
-    }
-  }, [requests, isOnline]);
 
-  // Handle marking a request as played
-  const handleMarkPlayed = useCallback(async (id: string) => {
-    if (!isOnline) {
-      toast.error('Cannot update requests while offline. Please check your internet connection.');
-      return;
-    }
-    
     try {
-      // Update the request as played
       const { error } = await supabase
-        .from('requests')
-        .update({ 
-          is_played: true,
-          is_locked: false
-        })
-        .eq('id', id);
-        
-      if (error) throw error;
-      
-      toast.success('Request marked as played');
-    } catch (error) {
-      console.error('Error marking request as played:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to update request. Please try again.');
-      }
-    }
-  }, [isOnline]);
-
-  // Handle resetting the request queue
-  const handleResetQueue = useCallback(async () => {
-    if (!isOnline) {
-      toast.error('Cannot reset queue while offline. Please check your internet connection.');
-      return;
-    }
-    
-    try {
-      // Count requests to be cleared
-      const pendingRequests = requests.filter(r => !r.isPlayed).length;
-      
-      // Reset all pending requests
-      const { error } = await supabase
-        .from('requests')
-        .update({ 
-          is_played: true,
-          is_locked: false,
-          votes: 0
-        })
-        .eq('is_played', false);
-        
-      if (error) throw error;
-      
-      // Log the reset
-      const { error: logError } = await supabase
-        .from('queue_reset_logs')
+        .from('songs')
         .insert({
-          set_list_id: activeSetList?.id,
-          reset_type: 'manual',
-          requests_cleared: pendingRequests
+          title: songData.title,
+          artist: songData.artist,
+          genre: songData.genre || null,
+          key: songData.key || null,
+          notes: songData.notes || null,
+          albumArtUrl: songData.albumArtUrl || null
         });
-        
-      if (logError) console.error('Error logging queue reset:', logError);
 
-      // Clear rate limits with proper WHERE clause
-      const { error: votesError } = await supabase
-        .from('user_votes')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000');
-        
-      if (votesError) console.error('Error clearing vote limits:', votesError);
-      
-      toast.success('Request queue cleared and rate limits reset');
+      if (error) throw error;
+
+      toast.success('Song added successfully');
+      refreshSongs();
     } catch (error) {
-      console.error('Error resetting queue:', error);
-      
-      if (error instanceof Error && (
-        error.message.includes('Failed to fetch') || 
-        error.message.includes('NetworkError') ||
-        error.message.includes('network'))
-      ) {
-        toast.error('Network error. Please check your connection and try again.');
-      } else {
-        toast.error('Failed to clear queue. Please try again.');
-      }
+      console.error('Error adding song:', error);
+      toast.error('Failed to add song. Please try again.');
     }
-  }, [requests, activeSetList, isOnline]);
+  }, [isOnline, refreshSongs]);
 
-  // Handle adding a new song
-  const handleAddSong = useCallback((song: Omit<Song, 'id'>) => {
-    setSongs(prev => [...prev, { ...song, id: uuidv4() }]);
-  }, []);
+  const handleUpdateSong = useCallback(async (updatedSong: Song) => {
+    if (!isOnline) {
+      toast.error('Cannot update song while offline. Please check your internet connection.');
+      return;
+    }
 
-  // Handle updating a song
-  const handleUpdateSong = useCallback((updatedSong: Song) => {
-    setSongs(prev => prev.map(song => 
-      song.id === updatedSong.id ? updatedSong : song
-    ));
-  }, []);
+    try {
+      const { error } = await supabase
+        .from('songs')
+        .update({
+          title: updatedSong.title,
+          artist: updatedSong.artist,
+          genre: updatedSong.genre || null,
+          key: updatedSong.key || null,
+          notes: updatedSong.notes || null,
+          albumArtUrl: updatedSong.albumArtUrl || null
+        })
+        .eq('id', updatedSong.id);
 
-  // Handle deleting a song
-  const handleDeleteSong = useCallback((id: string) => {
-    setSongs(prev => prev.filter(song => song.id !== id));
-  }, []);
+      if (error) throw error;
 
-  // Handle creating a new set list
-  const handleCreateSetList = useCallback(async (newSetList: Omit<SetList, 'id'>) => {
+      toast.success('Song updated successfully');
+      refreshSongs();
+    } catch (error) {
+      console.error('Error updating song:', error);
+      toast.error('Failed to update song. Please try again.');
+    }
+  }, [isOnline, refreshSongs]);
+
+  const handleDeleteSong = useCallback(async (id: string) => {
+    if (!isOnline) {
+      toast.error('Cannot delete song while offline. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('songs')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast.success('Song deleted successfully');
+      refreshSongs();
+    } catch (error) {
+      console.error('Error deleting song:', error);
+      toast.error('Failed to delete song. Please try again.');
+    }
+  }, [isOnline, refreshSongs]);
+
+  // Set list management
+  const handleCreateSetList = useCallback(async (setListData: Omit<SetList, 'id' | 'songs'>) => {
     if (!isOnline) {
       toast.error('Cannot create set list while offline. Please check your internet connection.');
       return;
     }
+
+    try {
+      const { error } = await supabase
+        .from('set_lists')
+        .insert({
+          name: setListData.name,
+          date: setListData.date,
+          notes: setListData.notes || '',
+          is_active: setListData.isActive || false
+        });
+
+      if (error) throw error;
+
+      toast.success('Set list created successfully');
+      refreshSetLists();
+    } catch (error) {
+      console.error('Error creating set list:', error);
+      toast.error('Failed to create set list. Please try again.');
+    }
+  }, [isOnline, refreshSetLists]);
+
+  const handleUpdateSetList = useCallback(async (updatedSetList: SetList) => {
+    if (!isOnline) {
+      toast.error('Cannot update set list while offline. Please check your internet connection.');
+      return;
+    }
     
     try {
-      // Extract songs from the set list to handle separately
-      const { songs, ...setListData } = newSetList;
+      const { id, songs, ...setListData } = updatedSetList;
       
       // Convert camelCase to snake_case for database
       const dbSetListData = {
@@ -824,30 +358,261 @@ function App() {
         is_active: setListData.isActive || false
       };
       
-      // Insert the set list
-      const { data, error } = await supabase
+      // Update set list data
+      const { error } = await supabase
         .from('set_lists')
-        .insert(dbSetListData)
-        .select();
+        .update(dbSetListData)
+        .eq('id', id);
         
       if (error) throw error;
       
-      if (data && songs && songs.length > 0) {
-        // Insert songs with positions
+      // Clear existing songs
+      const { error: deleteError } = await supabase
+        .from('set_list_songs')
+        .delete()
+        .eq('set_list_id', id);
+        
+      if (deleteError) throw deleteError;
+      
+      // Insert updated songs
+      if (songs && songs.length > 0) {
         const songMappings = songs.map((song, index) => ({
-          set_list_id: data[0].id,
+          set_list_id: id,
           song_id: song.id,
           position: index
         }));
         
-        const { error: songError } = await supabase
+        const { error: insertError } = await supabase
           .from('set_list_songs')
           .insert(songMappings);
           
-        if (songError) throw songError;
+        if (insertError) throw insertError;
       }
       
-      toast.success('Set list created successfully');
-      refreshSetLists(); // Refresh to get latest data
+      toast.success('Set list updated successfully');
+      refreshSetLists();
     } catch (error) {
-      console.error('Error creating
+      console.error('Error updating set list:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update set list. Please try again.');
+      }
+    }
+  }, [refreshSetLists, isOnline]);
+
+  const handleDeleteSetList = useCallback(async (id: string) => {
+    if (!isOnline) {
+      toast.error('Cannot delete set list while offline. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('set_lists')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast.success('Set list deleted successfully');
+      refreshSetLists();
+    } catch (error) {
+      console.error('Error deleting set list:', error);
+      toast.error('Failed to delete set list. Please try again.');
+    }
+  }, [isOnline, refreshSetLists]);
+
+  // Request queue management
+  const handleLockRequest = useCallback(async (requestId: string) => {
+    if (!isOnline) {
+      toast.error('Cannot lock request while offline. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      // First unlock any currently locked request
+      await supabase
+        .from('requests')
+        .update({ is_locked: false })
+        .eq('is_locked', true);
+
+      // Lock the selected request
+      const { error } = await supabase
+        .from('requests')
+        .update({ is_locked: true })
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      toast.success('Request locked as next');
+      refreshRequests();
+    } catch (error) {
+      console.error('Error locking request:', error);
+      toast.error('Failed to lock request. Please try again.');
+    }
+  }, [isOnline, refreshRequests]);
+
+  const handleMarkPlayed = useCallback(async (requestId: string) => {
+    if (!isOnline) {
+      toast.error('Cannot mark request as played while offline. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('requests')
+        .update({ 
+          is_played: true,
+          is_locked: false,
+          status: 'played'
+        })
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      toast.success('Request marked as played');
+      refreshRequests();
+    } catch (error) {
+      console.error('Error marking request as played:', error);
+      toast.error('Failed to mark request as played. Please try again.');
+    }
+  }, [isOnline, refreshRequests]);
+
+  const handleDeleteRequest = useCallback(async (requestId: string) => {
+    if (!isOnline) {
+      toast.error('Cannot delete request while offline. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('requests')
+        .delete()
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      toast.success('Request deleted');
+      refreshRequests();
+    } catch (error) {
+      console.error('Error deleting request:', error);
+      toast.error('Failed to delete request. Please try again.');
+    }
+  }, [isOnline, refreshRequests]);
+
+  const handleClearQueue = useCallback(async () => {
+    if (!isOnline) {
+      toast.error('Cannot clear queue while offline. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('requests')
+        .delete()
+        .eq('is_played', false);
+
+      if (error) throw error;
+
+      toast.success('Queue cleared');
+      refreshRequests();
+    } catch (error) {
+      console.error('Error clearing queue:', error);
+      toast.error('Failed to clear queue. Please try again.');
+    }
+  }, [isOnline, refreshRequests]);
+
+  // Render backend content based on active tab
+  const renderBackendContent = () => {
+    switch (activeBackendTab) {
+      case 'queue':
+        return (
+          <QueueView
+            requests={requests}
+            onLockRequest={handleLockRequest}
+            onMarkPlayed={handleMarkPlayed}
+            onDeleteRequest={handleDeleteRequest}
+            onClearQueue={handleClearQueue}
+          />
+        );
+      case 'songs':
+        return (
+          <SongLibrary
+            songs={songs}
+            onAddSong={handleAddSong}
+            onUpdateSong={handleUpdateSong}
+            onDeleteSong={handleDeleteSong}
+          />
+        );
+      case 'setlists':
+        return (
+          <SetListManager
+            songs={songs}
+            setLists={setLists}
+            onCreateSetList={handleCreateSetList}
+            onUpdateSetList={handleUpdateSetList}
+            onDeleteSetList={handleDeleteSetList}
+          />
+        );
+      case 'settings':
+        return <SettingsManager />;
+      case 'logo':
+        return <LogoManager />;
+      case 'colors':
+        return <ColorCustomizer />;
+      case 'ticker':
+        return <TickerManager />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <ErrorBoundary>
+      <div className="app-container">
+        {isInitializing ? (
+          <LoadingSpinner />
+        ) : isKiosk ? (
+          <KioskPage
+            songs={songs}
+            requests={requests}
+            onSubmitRequest={handleSubmitRequest}
+            settings={settings}
+          />
+        ) : isBackend ? (
+          isAdmin ? (
+            <div className="backend-container">
+              <BackendTabs
+                activeTab={activeBackendTab}
+                onTabChange={setActiveBackendTab}
+                onLogout={handleAdminLogout}
+              />
+              {renderBackendContent()}
+            </div>
+          ) : (
+            <BackendLogin onLogin={handleAdminLogin} />
+          )
+        ) : (
+          <UserFrontend
+            songs={songs}
+            requests={requests}
+            currentUser={currentUser}
+            onUserUpdate={handleUserUpdate}
+            onSubmitRequest={handleSubmitRequest}
+            onVoteRequest={handleVoteRequest}
+            settings={settings}
+          />
+        )}
+        <ConnectionStatus isOnline={isOnline} />
+      </div>
+    </ErrorBoundary>
+  );
+}
+
+export default App;
