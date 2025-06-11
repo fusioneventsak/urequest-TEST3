@@ -1,6 +1,7 @@
 // src/utils/supabase.ts
 import { createClient } from '@supabase/supabase-js';
 
+// Validate environment variables
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -8,6 +9,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+// Create Supabase client with improved configuration
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
@@ -16,18 +18,39 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   global: {
     headers: {
-      'X-Client-Info': 'song-request-app/1.0.0',
+      'X-Client-Info': 'song-request-app/1.0.1',
     },
   },
   realtime: {
     params: {
       eventsPerSecond: 10, // Increased from 5 to improve realtime responsiveness
     },
-    reconnect: {
-      maxRetries: 10,
-      delay: 1000
-    }
+    reconnect: true, // Enable automatic reconnection
+    timeout: 30000, // Increase timeout to 30 seconds
   },
+  db: {
+    schema: 'public'
+  },
+  // Add request timeouts to prevent hanging requests
+  fetch: (url, options) => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    
+    // Set a timeout to abort the request after 15 seconds
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 15000);
+    
+    return fetch(url, { ...options, signal })
+      .then(response => {
+        clearTimeout(timeoutId);
+        return response;
+      })
+      .catch(error => {
+        clearTimeout(timeoutId);
+        throw error;
+      });
+  }
 });
 
 // Helper function to handle Supabase errors

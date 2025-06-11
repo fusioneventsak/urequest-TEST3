@@ -6,6 +6,7 @@ import { UpvoteList } from './UpvoteList';
 import { RequestModal } from './RequestModal';
 import { LandingPage } from './LandingPage';
 import { Ticker } from './Ticker';
+import { ConnectionStatus } from './ConnectionStatus';
 import { useUiSettings } from '../hooks/useUiSettings';
 import type { Song, SongRequest, User } from '../types';
 
@@ -115,8 +116,8 @@ export function UserFrontend({
         className="border-b border-neon-purple/20"
         style={{ backgroundColor: navBgColor }}
       >
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex justify-between items-center h-12">
+        <div className="max-w-7xl mx-auto px-4 relative">
+          <div className="flex justify-between items-center h-12 relative">
             <button 
               onClick={() => setIsEditingProfile(true)}
               className="user-profile flex items-center group"
@@ -155,6 +156,11 @@ export function UserFrontend({
                 <span>Band Hub</span>
               </button>
             )}
+            
+            {/* Add connection status indicator */}
+            <div className="absolute right-4 top-14 z-10">
+              <ConnectionStatus showAlways={false} />
+            </div>
           </div>
         </div>
       </header>

@@ -110,6 +110,7 @@ class EnhancedRealtimeManager {
   private async attemptReconnection(): Promise<void> {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('❌ Max reconnection attempts reached');
+      this.notifyConnectionListeners('error');
       return;
     }
 
@@ -117,6 +118,7 @@ class EnhancedRealtimeManager {
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
     
     console.log(`🔄 Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+    this.notifyConnectionListeners('connecting');
     
     setTimeout(async () => {
       try {
@@ -126,6 +128,7 @@ class EnhancedRealtimeManager {
         this.notifyConnectionListeners('connected');
       } catch (error) {
         console.error('❌ Reconnection failed:', error);
+        this.notifyConnectionListeners('error');
         this.attemptReconnection();
       }
     }, delay);
@@ -157,6 +160,7 @@ class EnhancedRealtimeManager {
 
   private handleNetworkOnline(): void {
     console.log('🌐 Network back online - reconnecting');
+    this.notifyConnectionListeners('connecting');
     this.attemptReconnection();
   }
 
@@ -224,8 +228,11 @@ class EnhancedRealtimeManager {
         
         if (status === 'SUBSCRIBED') {
           console.log(`✅ Successfully subscribed to ${table} with ${determinedPriority} priority`);
+          this.connectionStatus = 'connected';
+          this.notifyConnectionListeners('connected');
         } else if (status === 'CHANNEL_ERROR') {
           console.error(`❌ Channel error for ${table}`);
+          this.notifyConnectionListeners('error');
           // Attempt to resubscribe after delay
           setTimeout(() => {
             this.createSubscription(table, callback, filter, priority);
@@ -247,6 +254,7 @@ class EnhancedRealtimeManager {
       
     } catch (error) {
       console.error(`❌ Error creating subscription to ${table}:`, error);
+      this.notifyConnectionListeners('error');
       throw error;
     }
   }
@@ -273,6 +281,12 @@ class EnhancedRealtimeManager {
 
   addConnectionListener(listener: (status: string) => void): void {
     this.connectionListeners.add(listener);
+    // Immediately notify with current status
+    try {
+      listener(this.connectionStatus);
+    } catch (error) {
+      console.error('❌ Error in connection listener:', error);
+    }
   }
 
   removeConnectionListener(listener: (status: string) => void): void {
@@ -303,6 +317,12 @@ class EnhancedRealtimeManager {
     this.notifyConnectionListeners('connecting');
     
     try {
+      // First try to ping the database
+      const { error } = await supabase.from('requests').select('id').limit(1);
+      if (error) {
+        console.warn('Database ping failed during reconnect:', error);
+      }
+      
       await this.reconnectAllChannels();
       this.connectionStatus = 'connected';
       this.reconnectAttempts = 0;

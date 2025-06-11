@@ -5,6 +5,7 @@ import { UserFrontend } from './components/UserFrontend';
 import { BackendLogin } from './components/BackendLogin';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { LoadingSpinner } from './components/shared/LoadingSpinner';
+import { ConnectionStatus } from './components/ConnectionStatus';
 import { useUiSettings } from './hooks/useUiSettings';
 import { useSongSync } from './hooks/useSongSync';
 import { useRequestSync } from './hooks/useRequestSync';
@@ -1091,6 +1092,7 @@ function App() {
                       Offline Mode
                     </div>
                   )}
+                  <ConnectionStatus showAlways={true} />
                   <button 
                     onClick={navigateToFrontend}
                     className="neon-button"

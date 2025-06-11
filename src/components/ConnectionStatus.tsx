@@ -1,23 +1,24 @@
 import React from 'react';
-import { Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Wifi, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useConnectionHealth } from '../hooks/useConnectionHealth';
 
 interface ConnectionStatusProps {
   className?: string;
   showDetails?: boolean;
+  showAlways?: boolean;
 }
 
-export function ConnectionStatus({ className = '', showDetails = false }: ConnectionStatusProps) {
+export function ConnectionStatus({ className = '', showDetails = false, showAlways = false }: ConnectionStatusProps) {
   const { status, reconnectAttempts, reconnect } = useConnectionHealth();
   
-  if (status === 'good' && !showDetails) {
+  if (status === 'good' && !showDetails && !showAlways) {
     return null; // Don't show anything when connection is good
   }
   
   return (
     <div className={`flex items-center ${className}`}>
       {status === 'good' && (
-        <div className="flex items-center text-green-400 text-xs">
+        <div className="flex items-center text-green-400 text-xs bg-green-400/10 px-2 py-1 rounded-md">
           <Wifi className="w-3 h-3 mr-1" />
           <span>Connected</span>
         </div>
@@ -31,6 +32,7 @@ export function ConnectionStatus({ className = '', showDetails = false }: Connec
         >
           <AlertTriangle className="w-3 h-3 mr-1" />
           <span>Weak Connection</span>
+          <RefreshCw className="w-3 h-3 ml-2" />
         </button>
       )}
       
@@ -42,6 +44,7 @@ export function ConnectionStatus({ className = '', showDetails = false }: Connec
         >
           <WifiOff className="w-3 h-3 mr-1" />
           <span>Disconnected</span>
+          <RefreshCw className="w-3 h-3 ml-2" />
         </button>
       )}
       

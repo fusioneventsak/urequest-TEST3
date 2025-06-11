@@ -3,6 +3,7 @@ import { useEffect, useCallback, useState, useRef } from 'react';
 import { supabase } from '../utils/supabase';
 import { cacheService } from '../utils/cache';
 import { enhancedRealtimeManager } from '../utils/realtimeManager';
+import { toast } from 'react-hot-toast';
 import type { SongRequest } from '../types';
 
 const REQUESTS_CACHE_KEY = 'requests:all';
@@ -22,6 +23,7 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
   const [error, setError] = useState<Error | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
+  const [fetchFailCount, setFetchFailCount] = useState(0);
   
   const mountedRef = useRef(true);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -41,9 +43,13 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
       setIsOnline(true);
       // Immediately fetch when coming back online
       fetchRequests(true);
+      toast.success('Network connection restored');
     };
     
-    const handleOffline = () => setIsOnline(false);
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast.error('Network connection lost. Using cached data.');
+    };
     
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -106,38 +112,92 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
 
       console.log('🔄 Fetching requests from database...');
 
+      // Set a timeout to abort the request if it takes too long
+      const timeoutId = setTimeout(() => {
+        if (abortControllerRef.current && !abortControllerRef.current.signal.aborted) {
+          console.warn('Request timeout - aborting fetch');
+          abortControllerRef.current.abort('Request timeout');
+        }
+      }, FETCH_TIMEOUT);
+
       // Optimized query with better joins and selective fields
-      const { data: requestsData, error: fetchError } = await supabase
-        .from('requests')
-        .select(`
-          id,
-          title,
-          artist,
-          votes,
-          status,
-          is_locked,
-          is_played,
-          created_at,
-          requesters!inner (
+      let requestsData;
+      let fetchError;
+      
+      try {
+        // First try with inner join
+        const result = await supabase
+          .from('requests')
+          .select(`
             id,
-            name,
-            photo,
-            message,
-            created_at
-          )
-        `)
-        .eq('is_played', false)
-        .order('created_at', { ascending: true })
-        .abortSignal(signal);
+            title,
+            artist,
+            votes,
+            status,
+            is_locked,
+            is_played,
+            created_at,
+            requesters!inner (
+              id,
+              name,
+              photo,
+              message,
+              created_at
+            )
+          `)
+          .eq('is_played', false)
+          .order('created_at', { ascending: true })
+          .abortSignal(signal);
+          
+        requestsData = result.data;
+        fetchError = result.error;
+        
+        // If inner join fails, try with left join
+        if (fetchError || !requestsData || requestsData.length === 0) {
+          console.log('Inner join failed or returned no results, trying left join...');
+          
+          const fallbackResult = await supabase
+            .from('requests')
+            .select(`
+              id,
+              title,
+              artist,
+              votes,
+              status,
+              is_locked,
+              is_played,
+              created_at,
+              requesters (
+                id,
+                name,
+                photo,
+                message,
+                created_at
+              )
+            `)
+            .eq('is_played', false)
+            .order('created_at', { ascending: true })
+            .abortSignal(signal);
+            
+          requestsData = fallbackResult.data;
+          fetchError = fallbackResult.error;
+        }
+      } catch (error) {
+        fetchError = error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (signal.aborted) return;
 
       if (fetchError) {
+        setFetchFailCount(prev => prev + 1);
         throw fetchError;
       }
 
       if (mountedRef.current) {
         console.log('✅ Requests fetched successfully:', requestsData?.length);
+        setFetchFailCount(0); // Reset fail count on success
         
         // Transform and format the data
         const formattedRequests = (requestsData || []).map(request => ({
@@ -189,6 +249,11 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
         if (cachedRequests) {
           console.warn('📦 Using stale cache due to fetch error');
           onUpdate(cachedRequests);
+          
+          // Only show toast after multiple failures to avoid spamming
+          if (fetchFailCount > 2) {
+            toast.error('Having trouble connecting to the server. Using cached data.');
+          }
         }
         
         // Implement exponential backoff retry
@@ -208,6 +273,12 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
           }, delay);
         } else {
           setIsLoading(false);
+           
+           // After all retries failed, try to reconnect the realtime connection
+           if (fetchFailCount > 3) {
+             console.log('Multiple fetch failures, attempting to reconnect realtime...');
+             enhancedRealtimeManager.reconnect().catch(console.error);
+           }
         }
       }
     } finally {
@@ -367,13 +438,16 @@ export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
   const reconnect = useCallback(async () => {
     console.log('🔄 Manual reconnection requested');
     setError(null);
+    toast.loading('Reconnecting to server...');
     
     try {
       await enhancedRealtimeManager.reconnect();
       fetchRequests(true);
+      toast.success('Reconnected successfully');
     } catch (error) {
       console.error('❌ Manual reconnection failed:', error);
       setError(error instanceof Error ? error : new Error(String(error)));
+      toast.error('Failed to reconnect. Please try again later.');
     }
   }, [fetchRequests]);
 
