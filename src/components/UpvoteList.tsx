@@ -7,12 +7,11 @@ import toast from 'react-hot-toast';
 
 interface UpvoteListProps {
   requests: SongRequest[];
-  currentUser: User | null;
-  onVoteRequest: (id: string) => Promise<boolean>;
-  isOnline: boolean;
+  onVote: (id: string) => Promise<boolean>;
+  currentUserId: string;
 }
 
-export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: UpvoteListProps) {
+export function UpvoteList({ requests, onVote, currentUserId }: UpvoteListProps) {
   const { settings } = useUiSettings();
   const songBorderColor = settings?.song_border_color || settings?.frontend_accent_color || '#ff00ff';
   const accentColor = settings?.frontend_accent_color || '#ff00ff';
@@ -22,18 +21,16 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
   const [votedRequests, setVotedRequests] = useState<Set<string>>(new Set());
   const [optimisticVotes, setOptimisticVotes] = useState<Map<string, number>>(new Map());
   
-  const currentUserId = currentUser?.id || currentUser?.name || '';
+  const currentUserId = currentUserId;
   
   // Debug log to see what props we're getting
   useEffect(() => {
     console.log('🔍 UpvoteList Debug:', {
-      currentUser,
-      isOnline,
       currentUserId,
-      hasCurrentUser: !!currentUser,
+      hasCurrentUserId: !!currentUserId,
       requestsCount: requests.length
     });
-  }, [currentUser, isOnline, currentUserId, requests.length]);
+  }, [currentUserId, requests.length]);
 
   // Clear optimistic votes when real data arrives
   useEffect(() => {
@@ -112,15 +109,10 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
     e.preventDefault();
     e.stopPropagation();
 
-    console.log('🔥 Vote button clicked!', { id, currentUser, isOnline, currentUserId });
+    console.log('🔥 Vote button clicked!', { id, currentUserId });
 
-    if (!currentUser) {
+    if (!currentUserId) {
       toast.error('Please log in to vote');
-      return;
-    }
-
-    if (!isOnline) {
-      toast.error('Cannot vote while offline');
       return;
     }
 
@@ -148,8 +140,8 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
       // Update local voted state
       setVotedRequests(prev => new Set([...prev, id]));
       
-      // Use the onVoteRequest prop to handle the actual voting
-      const success = await onVoteRequest(id);
+      // Use the onVote prop to handle the actual voting
+      const success = await onVote(id);
       
       if (!success) {
         // Revert optimistic updates if voting failed
@@ -342,8 +334,7 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
                   }}
                   title={
                     hasVoted ? 'Already voted' : 
-                    !currentUser ? 'Please log in to vote' :
-                    !isOnline ? 'Offline - cannot vote' :
+                    !currentUserId ? 'Please log in to vote' :
                     'Upvote this request'
                   }
                 >
