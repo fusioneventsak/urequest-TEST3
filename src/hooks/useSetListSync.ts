@@ -8,10 +8,11 @@ const SET_LISTS_CACHE_KEY = 'setLists:all';
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY = 1000; // 1 second base delay
 
-export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
+export function useSetListSync() {
+  const [setLists, setSetLists] = useState<SetList[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const retryCountRef = useRef(0); // Changed from useState to useRef
+  const retryCountRef = useRef(0);
   const mountedRef = useRef(true);
   const setListsSubscriptionRef = useRef<string | null>(null);
   const setListSongsSubscriptionRef = useRef<string | null>(null);
@@ -40,7 +41,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
         if (cachedSetLists?.length > 0) {
           console.log('Using cached set lists');
           if (mountedRef.current) {
-            onUpdate(cachedSetLists);
+            setSetLists(cachedSetLists);
             setIsLoading(false);
           }
           return;
@@ -78,8 +79,8 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
         }));
 
         cacheService.setSetLists(SET_LISTS_CACHE_KEY, formattedSetLists);
-        onUpdate(formattedSetLists);
-        retryCountRef.current = 0; // Use ref instead of setState
+        setSetLists(formattedSetLists);
+        retryCountRef.current = 0;
       }
     } catch (error) {
       console.error('Error fetching set lists:', error);
@@ -91,7 +92,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
         const cachedSetLists = cacheService.get<SetList[]>(SET_LISTS_CACHE_KEY);
         if (cachedSetLists) {
           console.warn('Using stale cache due to fetch error');
-          onUpdate(cachedSetLists);
+          setSetLists(cachedSetLists);
         }
         
         // Retry with exponential backoff
@@ -105,7 +106,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
           
           fetchTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
-              retryCountRef.current++; // Use ref instead of setState
+              retryCountRef.current++;
               fetchSetLists(true);
             }
           }, delay);
@@ -117,7 +118,7 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
       }
       fetchInProgressRef.current = false;
     }
-  }, [onUpdate]); // Removed retryCount from dependencies
+  }, []);
 
   // Setup realtime subscriptions
   useEffect(() => {
@@ -195,8 +196,9 @@ export function useSetListSync(onUpdate: (setLists: SetList[]) => void) {
   }, [fetchSetLists]);
 
   return { 
+    setLists,
     isLoading, 
     error, 
-    refetch: () => fetchSetLists(true) 
+    refreshSetLists: () => fetchSetLists(true) 
   };
 }
