@@ -70,7 +70,7 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
           const hasRequesters = request.requesters && request.requesters.length > 0;
 
           return (
-            <div key={request.id} className="glass-effect rounded-lg p-4">
+            <div key={request.id} className="glass-effect rounded-lg p-4 border-2" style={{ borderColor: `${accentColor}40` }}>
               <div className="flex items-center justify-between">
                   {/* Song Details */}
                   <div className="flex-1 min-w-0">
@@ -89,19 +89,22 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
                     <button
                       onClick={() => handleVote(request.id)}
                       disabled={!currentUser || isVoting || !isOnline}
-                      className="px-6 py-3 rounded-lg font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-6 py-3 rounded-lg font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed border-2"
                       style={{
-                        backgroundColor: isVoting ? secondaryAccent : accentColor,
+                        backgroundColor: accentColor,
+                        borderColor: accentColor,
                         color: 'white'
                       }}
                       onMouseEnter={(e) => {
                         if (!isVoting && currentUser && isOnline) {
-                          e.currentTarget.style.backgroundColor = `${secondaryAccent}CC`;
+                          e.currentTarget.style.backgroundColor = `${accentColor}DD`;
+                          e.currentTarget.style.borderColor = `${accentColor}DD`;
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (!isVoting) {
                           e.currentTarget.style.backgroundColor = accentColor;
+                          e.currentTarget.style.borderColor = accentColor;
                         }
                       }}
                     >
@@ -113,10 +116,7 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
                           <span>Voting...</span>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <ChevronUp className="w-5 h-5" />
-                          <span>Vote</span>
-                        </div>
+                        <span>Vote</span>
                       )}
                     </button>
                   </div>
