@@ -160,7 +160,12 @@ function App() {
       
       // Don't show errors for aborted requests or unmounted components
       const errorMessage = event.reason?.message || String(event.reason);
-      if (errorMessage.includes('aborted') || 
+      
+      // Handle AbortError specifically (which are DOMException instances)
+      if ((event.reason instanceof DOMException && event.reason.name === 'AbortError') ||
+          (event.reason instanceof Error && event.reason.name === 'AbortError') ||
+          errorMessage.includes('aborted') || 
+          errorMessage.includes('signal is aborted') ||
           errorMessage.includes('Component unmounted') ||
           errorMessage.includes('channel closed')) {
         // Silently handle these errors
@@ -841,14 +846,4 @@ function App() {
         
         const { error: songError } = await supabase
           .from('set_list_songs')
-          .insert(songMappings);
-          
-        if (songError) throw songError;
-      }
-      
-      toast.success('Set list created successfully');
-      refreshSetLists(); // Refresh to get latest data
-    } catch (error) {
-      console.error('Error creating set list:', error);
-      
-      if (error instanceof Error
+          .insert(songM
