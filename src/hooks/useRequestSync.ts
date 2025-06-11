@@ -1,4 +1,4 @@
-// src/hooks/useOptimizedRequestSync.ts
+// src/hooks/useRequestSync.ts
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { supabase } from '../utils/supabase';
 import { cacheService } from '../utils/cache';
@@ -17,7 +17,7 @@ const REFRESH_INTERVALS = {
   SLOW: 60000     // 60 seconds for background updates
 };
 
-export function useOptimizedRequestSync(onUpdate: (requests: SongRequest[]) => void) {
+export function useRequestSync(onUpdate: (requests: SongRequest[]) => void) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
