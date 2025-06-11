@@ -1,4 +1,5 @@
 // src/components/UserFrontend.tsx
+import { useState } from 'react';
 import { SongList } from './SongList';
 import { UpvoteList } from './UpvoteList';
 import { RequestModal } from './RequestModal';
@@ -6,7 +7,7 @@ import { LandingPage } from './LandingPage';
 import { Ticker } from './Ticker';
 import { ConnectionStatus } from './ConnectionStatus';
 import { useUiSettings } from '../hooks/useUiSettings';
-import type { Song, SongRequest, User } from '../types';
+import type { Song, SongRequest, User, SetList, RequestFormData } from '../types';
 
 interface UserFrontendProps {
   songs: Song[];
