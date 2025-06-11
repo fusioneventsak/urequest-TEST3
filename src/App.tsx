@@ -7,7 +7,7 @@ import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { LoadingSpinner } from './components/shared/LoadingSpinner';
 import { useUiSettings } from './hooks/useUiSettings';
 import { useSongSync } from './hooks/useSongSync';
-import { useOptimizedRequestSync } from './hooks/useRequestSync';
+import { useRequestSync } from './hooks/useRequestSync';
 import { useSetListSync } from './hooks/useSetListSync';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
@@ -67,7 +67,7 @@ function App() {
   
   // Initialize data synchronization
   const { isLoading: isFetchingSongs } = useSongSync(setSongs);
-  const { isLoading: isFetchingRequests, reconnect: reconnectRequests } = useOptimizedRequestSync(setRequests);
+  const { isLoading: isFetchingRequests, reconnect: reconnectRequests } = useRequestSync(setRequests);
   const { isLoading: isFetchingSetLists, refetch: refreshSetLists } = useSetListSync(setSetLists);
 
   // Enhanced photo compression function with aggressive compression for database storage
@@ -851,3 +851,389 @@ function App() {
     } catch (error) {
       console.error('Error creating set list:', error);
       
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to create set list. Please try again.');
+      }
+    }
+  }, [refreshSetLists, isOnline]);
+
+  // Handle updating a set list
+  const handleUpdateSetList = useCallback(async (updatedSetList: SetList) => {
+    if (!isOnline) {
+      toast.error('Cannot update set list while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      const { id, songs, ...setListData } = updatedSetList;
+      
+      // Convert camelCase to snake_case for database
+      const dbSetListData = {
+        name: setListData.name,
+        date: setListData.date,
+        notes: setListData.notes,
+        is_active: setListData.isActive || false
+      };
+      
+      // Update set list data
+      const { error } = await supabase
+        .from('set_lists')
+        .update(dbSetListData)
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      // Clear existing songs
+      const { error: deleteError } = await supabase
+        .from('set_list_songs')
+        .delete()
+        .eq('set_list_id', id);
+        
+      if (deleteError) throw deleteError;
+      
+      // Insert updated songs
+      if (songs && songs.length > 0) {
+        const songMappings = songs.map((song, index) => ({
+          set_list_id: id,
+          song_id: song.id,
+          position: index
+        }));
+        
+        const { error: insertError } = await supabase
+          .from('set_list_songs')
+          .insert(songMappings);
+          
+        if (insertError) throw insertError;
+      }
+      
+      toast.success('Set list updated successfully');
+      refreshSetLists(); // Refresh to get latest data
+    } catch (error) {
+      console.error('Error updating set list:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update set list. Please try again.');
+      }
+    }
+  }, [refreshSetLists, isOnline]);
+
+  // Handle deleting a set list
+  const handleDeleteSetList = useCallback(async (id: string) => {
+    if (!isOnline) {
+      toast.error('Cannot delete set list while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      // Set list songs will be deleted via cascade
+      const { error } = await supabase
+        .from('set_lists')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      toast.success('Set list deleted successfully');
+    } catch (error) {
+      console.error('Error deleting set list:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to delete set list. Please try again.');
+      }
+    }
+  }, [isOnline]);
+
+  // Handle activating/deactivating a set list
+  const handleSetActive = useCallback(async (id: string) => {
+    if (!isOnline) {
+      toast.error('Cannot update set list while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      // Get the current set list
+      const setList = setLists.find(sl => sl.id === id);
+      if (!setList) return;
+      
+      // Toggle active state
+      const newActiveState = !setList.isActive;
+      
+      // Update in database (using snake_case for database field names)
+      const { error } = await supabase
+        .from('set_lists')
+        .update({ is_active: newActiveState })
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      toast.success(newActiveState 
+        ? 'Set list activated successfully' 
+        : 'Set list deactivated successfully');
+        
+      // Force refresh set lists to ensure we get latest data with proper isActive state
+      refreshSetLists();
+    } catch (error) {
+      console.error('Error toggling set list active state:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update set list. Please try again.');
+      }
+    }
+  }, [setLists, refreshSetLists, isOnline]);
+
+  // Handle updating logo URL
+  const handleLogoUpdate = useCallback(async (url: string) => {
+    if (!isOnline) {
+      toast.error('Cannot update logo while offline. Please check your internet connection.');
+      return;
+    }
+    
+    try {
+      await updateSettings({
+        band_logo_url: url,
+        updated_at: new Date().toISOString()
+      });
+      
+      toast.success('Logo updated successfully');
+    } catch (error) {
+      console.error('Error updating logo:', error);
+      
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('network'))
+      ) {
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        toast.error('Failed to update logo. Please try again.');
+      }
+    }
+  }, [updateSettings, isOnline]);
+
+  // Determine what page to show
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-darker-purple flex items-center justify-center">
+        <LoadingSpinner size="lg" message="Loading application..." />
+      </div>
+    );
+  }
+
+  // Show login page if accessing backend and not authenticated
+  if (isBackend && !isAdmin) {
+    return <BackendLogin onLogin={handleAdminLogin} />;
+  }
+
+  // Show kiosk page if accessing /kiosk
+  if (isKiosk) {
+    return (
+      <ErrorBoundary>
+        <KioskPage 
+          songs={songs}
+          requests={requests}
+          activeSetList={activeSetList}
+          logoUrl={settings?.band_logo_url || DEFAULT_BAND_LOGO}
+          onSubmitRequest={handleSubmitRequest}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  // Show backend if accessing /backend and authenticated
+  if (isBackend && isAdmin) {
+    // Define lockedRequest variable before using it
+    const lockedRequest = requests.find(r => r.isLocked && !r.isPlayed);
+    
+    return (
+      <ErrorBoundary>
+        <div className="min-h-screen bg-darker-purple">
+          <div className="max-w-7xl mx-auto p-4 sm:p-6">
+            <header className="mb-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between">
+                <div className="flex items-center mb-4 md:mb-0">
+                  <Logo 
+                    url={settings?.band_logo_url || DEFAULT_BAND_LOGO}
+                    className="h-12 mr-4"
+                  />
+                  <h1 className="text-3xl font-bold neon-text mb-2">
+                    Band Request Hub
+                  </h1>
+                </div>
+                
+                <div className="flex items-center space-x-4">
+                  {!isOnline && (
+                    <div className="px-3 py-1 bg-red-500/20 text-red-400 rounded-md text-sm flex items-center">
+                      <span className="mr-1">●</span>
+                      Offline Mode
+                    </div>
+                  )}
+                  <button 
+                    onClick={navigateToFrontend}
+                    className="neon-button"
+                  >
+                    Exit to Public View
+                  </button>
+                  <button 
+                    onClick={navigateToKiosk}
+                    className="neon-button"
+                  >
+                    Kiosk View
+                  </button>
+                  <button 
+                    onClick={handleAdminLogout}
+                    className="px-4 py-2 text-red-400 hover:bg-red-400/20 rounded-md flex items-center"
+                  >
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </button>
+                </div>
+              </div>
+              
+              <p className="text-gray-300 max-w-2xl mt-2 mb-4">
+                Manage your set lists, song library, and customize the request system all in one place.
+              </p>
+            </header>
+
+            <BackendTabs 
+              activeTab={activeBackendTab}
+              onTabChange={setActiveBackendTab}
+            />
+
+            <div className="space-y-8">
+              {activeBackendTab === 'requests' && (
+                <ErrorBoundary>
+                  <div className="glass-effect rounded-lg p-6">
+                    <h2 className="text-xl font-semibold neon-text mb-4">Current Request Queue</h2>
+                    <QueueView 
+                      requests={requests}
+                      onLockRequest={handleLockRequest}
+                      onMarkPlayed={handleMarkPlayed}
+                      onResetQueue={handleResetQueue}
+                    />
+                  </div>
+
+                  <ErrorBoundary>
+                    <TickerManager 
+                      nextSong={lockedRequest
+                        ? {
+                            title: lockedRequest.title,
+                            artist: lockedRequest.artist
+                          }
+                        : undefined
+                      }
+                      isActive={isTickerActive}
+                      customMessage={tickerMessage}
+                      onUpdateMessage={setTickerMessage}
+                      onToggleActive={() => setIsTickerActive(!isTickerActive)}
+                    />
+                  </ErrorBoundary>
+                </ErrorBoundary>
+              )}
+
+              {activeBackendTab === 'setlists' && (
+                <ErrorBoundary>
+                  <SetListManager 
+                    songs={songs}
+                    setLists={setLists}
+                    onCreateSetList={handleCreateSetList}
+                    onUpdateSetList={handleUpdateSetList}
+                    onDeleteSetList={handleDeleteSetList}
+                    onSetActive={handleSetActive}
+                  />
+                </ErrorBoundary>
+              )}
+
+              {activeBackendTab === 'songs' && (
+                <ErrorBoundary>
+                  <SongLibrary 
+                    songs={songs}
+                    onAddSong={handleAddSong}
+                    onUpdateSong={handleUpdateSong}
+                    onDeleteSong={handleDeleteSong}
+                  />
+                </ErrorBoundary>
+              )}
+
+              {activeBackendTab === 'settings' && (
+                <>
+                  <ErrorBoundary>
+                    <LogoManager 
+                      isAdmin={isAdmin}
+                      currentLogoUrl={settings?.band_logo_url || null}
+                      onLogoUpdate={handleLogoUpdate}
+                    />
+                  </ErrorBoundary>
+
+                  <ErrorBoundary>
+                    <ColorCustomizer isAdmin={isAdmin} />
+                  </ErrorBoundary>
+
+                  <ErrorBoundary>
+                    <SettingsManager />
+                  </ErrorBoundary>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </ErrorBoundary>
+    );
+  }
+
+  // Show landing page if no user is set up
+  if (!currentUser) {
+    return (
+      <ErrorBoundary>
+        <LandingPage onComplete={handleUserUpdate} />
+      </ErrorBoundary>
+    );
+  }
+
+  // Show main frontend
+  return (
+    <ErrorBoundary>
+      <UserFrontend 
+        songs={songs}
+        requests={requests}
+        activeSetList={activeSetList}
+        currentUser={currentUser}
+        onSubmitRequest={handleSubmitRequest}
+        onVoteRequest={handleVoteRequest}
+        onUpdateUser={handleUserUpdate}
+        logoUrl={settings?.band_logo_url || DEFAULT_BAND_LOGO}
+        isAdmin={isAdmin}
+        onLogoClick={onLogoClick}
+        onBackendAccess={navigateToBackend}
+      />
+    </ErrorBoundary>
+  );
+}
+
+export default App;
+
+
+export default App
