@@ -178,7 +178,6 @@ export function UpvoteList({ requests, currentUser, onVoteRequest, isOnline }: U
                     )}
                   </div>
                 </div>
-              </div>
             </div>
           );
         })}
