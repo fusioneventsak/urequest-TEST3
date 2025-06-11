@@ -35,10 +35,23 @@ export function UpvoteList({
   isOnline,
   reconnectRequests
 }: UpvoteListProps) {
+  // Local state for the UpvoteList component
+  const [currentUserState, setCurrentUser] = useState(currentUser);
+  const [songsState, setSongs] = useState(songs);
+  
   // Ref to track if component is mounted
   const mountedRef = useRef(true);
   const requestInProgressRef = useRef(false);
   const requestRetriesRef = useRef(0);
+
+  // Sync props with local state
+  useEffect(() => {
+    setCurrentUser(currentUser);
+  }, [currentUser]);
+
+  useEffect(() => {
+    setSongs(songs);
+  }, [songs]);
 
   // Enhanced photo compression function with aggressive compression for database storage
   const compressPhoto = useCallback((
@@ -161,36 +174,8 @@ export function UpvoteList({
     };
   }, []);
 
-  // Handle online/offline status
-  useEffect(() => {
-    const handleOnline = () => {
-      console.log('🌐 Network connection restored');
-      setIsOnline(true);
-      
-      // Attempt to reconnect and refresh data
-      reconnectRequests();
-      refreshSetLists();
-      
-      toast.success('Network connection restored');
-    };
-
-    const handleOffline = () => {
-      console.log('🌐 Network connection lost');
-      setIsOnline(false);
-      toast.error('Network connection lost. You can still view cached content.');
-    };
-
-    // Set initial state
-    setIsOnline(navigator.onLine);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [reconnectRequests, refreshSetLists]);
+  // REMOVED: The problematic useEffect that was calling setIsOnline
+  // The isOnline prop is managed by the parent component
 
   // Enhanced user update function with photo validation and compression
   const handleUserUpdate = useCallback(async (user: UserType, photoFile?: File) => {
@@ -252,20 +237,18 @@ export function UpvoteList({
         toast.warning('Profile updated but could not be saved locally');
       }
       
+      // Call parent update handler
+      onUpdateUser(finalUser, photoFile);
+      
       toast.success('Profile updated successfully!');
     } catch (error) {
       console.error('Error updating user:', error);
       toast.error('Failed to update profile. Please try again.');
     }
-  }, [compressPhoto]);
-
-  // Handle logo click
-  const onLogoClick = useCallback(() => {
-    // Empty function to handle logo clicks
-  }, []);
+  }, [compressPhoto, onUpdateUser]);
 
   // Generate default avatar
-  const generateDefaultAvatar = (name: string): string => {
+  const generateDefaultAvatar = useCallback((name: string): string => {
     // Generate a simple SVG with the user's initials
     const initials = name.split(' ')
       .map(part => part.charAt(0).toUpperCase())
@@ -286,7 +269,7 @@ export function UpvoteList({
     `;
     
     return `data:image/svg+xml;base64,${btoa(svg)}`;
-  };
+  }, []);
 
   // Handle song request submission with retry logic and enhanced photo support
   const handleSubmitRequest = useCallback(async (data: RequestFormData): Promise<boolean> => {
@@ -334,11 +317,11 @@ export function UpvoteList({
       if (error) throw error;
 
       // Update current user if provided
-      if (data.userName && data.userName !== currentUser?.name) {
+      if (data.userName && data.userName !== currentUserState?.name) {
         const updatedUser = {
-          id: currentUser?.id || data.userName,
+          id: currentUserState?.id || data.userName,
           name: data.userName,
-          photo: data.userPhoto || currentUser?.photo || null
+          photo: data.userPhoto || currentUserState?.photo || null
         };
         
         setCurrentUser(updatedUser);
@@ -400,7 +383,7 @@ export function UpvoteList({
     } finally {
       requestInProgressRef.current = false;
     }
-  }, [reconnectRequests, generateDefaultAvatar]);
+  }, [reconnectRequests, generateDefaultAvatar, activeSetList, currentUserState]);
 
   // Handle request vote with error handling
   const handleVoteRequest = useCallback(async (id: string): Promise<boolean> => {
@@ -410,7 +393,7 @@ export function UpvoteList({
     }
     
     try {
-      if (!currentUser || !currentUser.id) {
+      if (!currentUserState || !currentUserState.id) {
         throw new Error('You must be logged in to vote');
       }
 
@@ -419,7 +402,7 @@ export function UpvoteList({
         .from('user_votes')
         .select('id')
         .eq('request_id', id)
-        .eq('user_id', currentUser.id || currentUser.name)
+        .eq('user_id', currentUserState.id || currentUserState.name)
         .maybeSingle();
 
       if (checkError && checkError.code !== 'PGRST116') { // Not found is ok
@@ -454,7 +437,7 @@ export function UpvoteList({
         .from('user_votes')
         .insert({
           request_id: id,
-          user_id: currentUser.id || currentUser.name,
+          user_id: currentUserState.id || currentUserState.name,
           created_at: new Date().toISOString()
         });
         
@@ -479,7 +462,7 @@ export function UpvoteList({
       
       return false;
     }
-  }, [currentUser, isOnline]);
+  }, [currentUserState, isOnline]);
 
   // Handle locking a request (marking it as next)
   const handleLockRequest = useCallback(async (id: string) => {
@@ -597,7 +580,7 @@ export function UpvoteList({
     setSongs(prev => prev.filter(song => song.id !== id));
   }, []);
 
-  // Handle creating a new set list - FIXED: Complete the console.error statement
+  // Handle creating a new set list
   const handleCreateSetList = useCallback(async (newSetList: Omit<SetList, 'id'>) => {
     if (!isOnline) {
       toast.error('Cannot create set list while offline. Please check your internet connection.');
@@ -716,10 +699,10 @@ export function UpvoteList({
               )}
             </div>
             <div className="flex items-center gap-2">
-              {lockedRequest.userPhoto ? (
+              {lockedRequest.requesters && lockedRequest.requesters[0]?.photo ? (
                 <img 
-                  src={lockedRequest.userPhoto} 
-                  alt={lockedRequest.userName}
+                  src={lockedRequest.requesters[0].photo} 
+                  alt={lockedRequest.requesters[0].name}
                   className="w-8 h-8 rounded-full object-cover"
                 />
               ) : (
@@ -727,7 +710,9 @@ export function UpvoteList({
                   <User className="w-4 h-4 text-white/70" />
                 </div>
               )}
-              <span className="text-white/70 text-sm">{lockedRequest.userName}</span>
+              <span className="text-white/70 text-sm">
+                {lockedRequest.requesters?.[0]?.name || 'Anonymous'}
+              </span>
             </div>
           </div>
         </div>
@@ -773,17 +758,19 @@ export function UpvoteList({
                       <p className="text-white/70 text-sm mb-2">by {request.artist}</p>
                     )}
 
-                    {request.notes && (
-                      <p className="text-white/60 text-sm mb-2 italic">"{request.notes}"</p>
+                    {request.requesters && request.requesters.some(r => r.message) && (
+                      <p className="text-white/60 text-sm mb-2 italic">
+                        "{request.requesters.find(r => r.message)?.message}"
+                      </p>
                     )}
 
                     {/* User info */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        {request.userPhoto ? (
+                        {request.requesters && request.requesters[0]?.photo ? (
                           <img 
-                            src={request.userPhoto} 
-                            alt={request.userName}
+                            src={request.requesters[0].photo} 
+                            alt={request.requesters[0].name}
                             className="w-6 h-6 rounded-full object-cover"
                           />
                         ) : (
@@ -791,7 +778,9 @@ export function UpvoteList({
                             <User className="w-3 h-3 text-white/70" />
                           </div>
                         )}
-                        <span className="text-white/70 text-sm">{request.userName}</span>
+                        <span className="text-white/70 text-sm">
+                          {request.requesters?.[0]?.name || 'Anonymous'}
+                        </span>
                         <span className="text-white/50 text-xs">
                           {new Date(request.createdAt).toLocaleTimeString([], {
                             hour: '2-digit',
